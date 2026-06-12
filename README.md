@@ -1,71 +1,150 @@
 # CloudFlare-AccessDock
 
-CloudFlare-AccessDock 是一个部署在 Cloudflare Workers 上的通用访问控制服务。它不绑定固定域名，也不绑定具体业务项目。你可以把它部署到 `auth.leiyun.blog`、`gate.example.com` 或任何自己的域名。
+CloudFlare-AccessDock is a lightweight access-control service for Cloudflare Workers. It provides a small admin console where you can configure protected hosts and routes at runtime, then let different projects call the same access-check API.
 
-## 能做什么
-
-- 在管理台热配置需要登录的域名和路径。
-- 支持固定密码、临时码、仅管理员访问。
-- 临时码支持分钟、小时、天级别有效期。
-- 不保留登录的临时码会生成一次性 grant，刷新后失效。
-- 简历、图床、paste 等项目都可以通过同一个客户端函数接入。
-
-## 项目结构
+It does not bind itself to any fixed domain or business project. Deploy it to any domain you own, for example:
 
 ```text
-src/index.js              Worker 主服务和管理台
-client/accessdock-client.js 业务项目接入用的小校验函数
-migrations/0001_init.sql  D1 数据库表结构
-wrangler.toml             Cloudflare Workers 配置
+https://auth.example.com
+https://gate.example.com
+https://access.example.com
 ```
 
-## 环境变量
+## Features
+
+- Runtime rule management from `/admin`
+- Host + path pattern matching, such as `files.example.com/private/*`
+- Fixed password access
+- Temporary access codes
+- Admin-only access
+- One-time access flow: refresh after access will require login again
+- Minute/hour/day level temporary access duration
+- Reusable client helper for Pages Functions or Workers projects
+
+## Project Structure
 
 ```text
-PUBLIC_BASE_URL=https://auth.leiyun.blog
-COOKIE_DOMAIN=.leiyun.blog
-ADMIN_PASSWORD=你的管理员密码
-SESSION_SECRET=一段很长的随机字符串
+src/index.js                 Worker service and admin console
+client/accessdock-client.js  Reusable client-side Worker helper
+migrations/0001_init.sql     D1 database schema
+wrangler.toml                Cloudflare Workers config
 ```
 
-`PUBLIC_BASE_URL` 是 AccessDock 自己的公开访问地址。代码不写死任何默认域名。
+## Deployment Flow
 
-## D1
+1. Create a Cloudflare D1 database.
+2. Copy the D1 `database_id` into `wrangler.toml`.
+3. Configure environment variables.
+4. Apply the D1 migration.
+5. Deploy the Worker.
+6. Bind your custom domain to the Worker.
+7. Open `/admin` and create protected route rules.
+8. Add `client/accessdock-client.js` to the projects that need access control.
 
-创建 D1 数据库后，把 `wrangler.toml` 里的 `database_id` 替换成真实 ID，然后执行：
+## Environment Variables
+
+Set these variables in Cloudflare Workers:
+
+```text
+PUBLIC_BASE_URL=https://auth.example.com
+COOKIE_DOMAIN=.example.com
+ADMIN_PASSWORD=your-admin-password
+SESSION_SECRET=a-long-random-secret
+```
+
+Notes:
+
+- `PUBLIC_BASE_URL` is the public URL of AccessDock.
+- `COOKIE_DOMAIN` is optional. Use it only when AccessDock and protected projects are under the same parent domain.
+- `ADMIN_PASSWORD` is used for the `/admin` console.
+- `SESSION_SECRET` signs cookies and access tokens. Use a long random string.
+
+## D1 Setup
+
+Create the database:
+
+```powershell
+wrangler d1 create accessdock
+```
+
+Update `wrangler.toml`:
+
+```toml
+[[d1_databases]]
+binding = "ACCESSDOCK_DB"
+database_name = "accessdock"
+database_id = "your-real-d1-database-id"
+```
+
+Apply migrations:
 
 ```powershell
 npm run db:migrate
 ```
 
-本地开发可以执行：
+For local development:
 
 ```powershell
 npm run db:migrate:local
 npm run dev
 ```
 
-## 管理台
+## Admin Console
 
-访问：
-
-```text
-https://你的域名/admin
-```
-
-管理台可以新增规则：
+Open:
 
 ```text
-host: img.leiyun.blog
-pathPattern: /file/private/*
-mode: password / code / admin
+https://auth.example.com/admin
 ```
 
-保存后立即生效，不需要重新部署。
+You can create rules like:
 
-## 业务项目接入
+```text
+host: files.example.com
+pathPattern: /private/*
+mode: password
+```
 
-把 `client/accessdock-client.js` 复制到业务项目里，然后在请求入口调用：
+Or:
+
+```text
+host: paste.example.com
+pathPattern: /p/*
+mode: code
+```
+
+Rules are stored in D1 and become effective immediately after saving. No redeploy is required.
+
+## Rule Modes
+
+```text
+password  Fixed password for the matched route
+code      Temporary access code for the matched route
+admin     Admin session required
+```
+
+Temporary codes can be created from the admin console. They support:
+
+- one-time access without persistent login
+- 1/2/3/5/10/30 minutes
+- 1/2 hours
+- 1 day
+
+## Integrating a Project
+
+Copy this file into the protected project:
+
+```text
+client/accessdock-client.js
+```
+
+Configure the protected project:
+
+```text
+ACCESSDOCK_BASE_URL=https://auth.example.com
+```
+
+Call `checkAccess` before returning protected content:
 
 ```js
 import { checkAccess } from "./accessdock-client.js";
@@ -75,27 +154,53 @@ export default {
     const access = await checkAccess(request, env);
     if (!access.ok) return access.response;
 
-    return new Response("原业务逻辑继续执行");
+    return new Response("Continue original business logic");
   },
 };
 ```
 
-业务项目需要配置：
+For a file service, call `checkAccess` only before protected file responses. Public files, upload routes, and admin routes can remain unchanged.
+
+## Matching Rules
+
+Rules match `host + path`.
+
+Wildcard `*` is supported:
 
 ```text
-ACCESSDOCK_BASE_URL=https://auth.leiyun.blog
-```
-
-图床如果只想保护某个文件下载入口，就在返回文件之前调用 `checkAccess`，其他后台、上传、公开文件不受影响。
-
-## 规则匹配
-
-规则支持 `*` 通配：
-
-```text
-/file/private/*
-/file/notes/a.pdf
+/private/*
+/files/report.pdf
 /p/*
 ```
 
-匹配逻辑是 `host + path`。未命中任何启用规则时，AccessDock 返回允许访问。
+If no enabled rule matches a request, AccessDock returns `allowed: true`.
+
+## Example
+
+Admin rule:
+
+```text
+host: files.example.com
+pathPattern: /private/*
+mode: code
+```
+
+User opens:
+
+```text
+https://files.example.com/private/report.pdf
+```
+
+The protected project calls:
+
+```text
+https://auth.example.com/api/check?return=https%3A%2F%2Ffiles.example.com%2Fprivate%2Freport.pdf
+```
+
+If the user is not authorized, AccessDock returns a login URL. The protected project redirects the user there.
+
+## Security Notes
+
+- AccessDock cannot protect websites that do not call its check API or do not route traffic through your Cloudflare account.
+- Do not edit bundled Worker code in the Cloudflare dashboard if the project is deployed by GitHub Actions or Wrangler. Edit the source repo instead.
+- Keep `SESSION_SECRET` private.
