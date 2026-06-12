@@ -1,0 +1,15 @@
+name = "cloudflare-accessdock"
+main = "src/index.js"
+compatibility_date = "2026-06-01"
+
+[vars]
+PUBLIC_BASE_URL = "https://auth.example.com"
+COOKIE_NAME = "accessdock_session"
+ACCESS_COOKIE_NAME = "accessdock_access"
+DEFAULT_ACCESS_SECONDS = "86400"
+
+[[d1_databases]]
+binding = "ACCESSDOCK_DB"
+database_name = "accessdock"
+database_id = "replace-with-your-d1-database-id"
+
