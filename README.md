@@ -27,23 +27,53 @@ https://access.example.com
 src/index.js                 Worker service and admin console
 client/accessdock-client.js  Reusable client-side Worker helper
 migrations/0001_init.sql     D1 database schema
-wrangler.toml                Cloudflare Workers config
+wrangler.toml                Local template config
+scripts/render-wrangler.mjs  Generates deploy config from build variables
 ```
 
 ## Deployment Flow
 
 1. Create a Cloudflare D1 database.
-2. Copy the D1 `database_id` into `wrangler.toml`.
-3. Configure environment variables.
-4. Apply the D1 migration.
+2. Create a Cloudflare Worker connected to this GitHub repository.
+3. Add the build variable `D1_DATABASE_ID` in Cloudflare.
+4. Configure runtime environment variables.
 5. Deploy the Worker.
-6. Bind your custom domain to the Worker.
-7. Open `/admin` and create protected route rules.
-8. Add `client/accessdock-client.js` to the projects that need access control.
+6. Apply the D1 migration.
+7. Bind your custom domain to the Worker.
+8. Open `/admin` and create protected route rules.
+9. Add `client/accessdock-client.js` to the projects that need access control.
+
+## Cloudflare Git Deploy
+
+Use these settings when deploying from Cloudflare Workers + GitHub:
+
+```text
+Deploy command: npm run deploy
+```
+
+Cloudflare will install dependencies automatically. If the dashboard also asks for a build command, leave it empty unless your project page requires one.
+
+If Cloudflare only asks for one deploy command, use:
+
+```text
+npm run deploy
+```
+
+Add these build environment variables in Cloudflare:
+
+```text
+D1_DATABASE_ID=your-real-d1-database-id
+D1_DATABASE_NAME=accessdock
+WORKER_NAME=cloudflare-accessdock
+```
+
+Only `D1_DATABASE_ID` is required. `D1_DATABASE_NAME` and `WORKER_NAME` are optional.
+
+The repository keeps `wrangler.toml` as a template. During deployment, `scripts/render-wrangler.mjs` creates an ignored `wrangler.generated.toml` file and Wrangler deploys with that generated config. This keeps the real D1 database id out of Git.
 
 ## Environment Variables
 
-Set these variables in Cloudflare Workers:
+Set these runtime variables in Cloudflare Workers:
 
 ```text
 PUBLIC_BASE_URL=https://auth.example.com
@@ -67,18 +97,16 @@ Create the database:
 wrangler d1 create accessdock
 ```
 
-Update `wrangler.toml`:
-
-```toml
-[[d1_databases]]
-binding = "ACCESSDOCK_DB"
-database_name = "accessdock"
-database_id = "your-real-d1-database-id"
-```
-
 Apply migrations:
 
 ```powershell
+npm run db:migrate
+```
+
+When running migrations from Cloudflare Git deploy, make sure `D1_DATABASE_ID` exists as a build environment variable. When running locally, set it in your shell first:
+
+```powershell
+$env:D1_DATABASE_ID="your-real-d1-database-id"
 npm run db:migrate
 ```
 
