@@ -1,4 +1,4 @@
-name = "cloudflare-accessdock"
+name = "CloudFlare-AccessDock"
 main = "src/index.js"
 compatibility_date = "2026-06-01"
 
@@ -12,4 +12,3 @@ DEFAULT_ACCESS_SECONDS = "86400"
 binding = "ACCESSDOCK_DB"
 database_name = "accessdock"
 database_id = "replace-with-your-d1-database-id"
-
