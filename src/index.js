@@ -392,15 +392,25 @@ async function hashSecret(value, env) {
 function parseTarget(returnUrl) {
   try {
     const url = new URL(returnUrl);
-    return { host: url.host.toLowerCase(), path: url.pathname || "/" };
+    return { host: url.host.toLowerCase(), path: safeDecodePath(url.pathname || "/") };
   } catch {
     return null;
   }
 }
 
+function safeDecodePath(path) {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+}
+
 function wildcardMatch(path, pattern) {
-  const escaped = pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
-  return new RegExp(`^${escaped}$`).test(path);
+  const normalizedPath = safeDecodePath(path);
+  const normalizedPattern = safeDecodePath(pattern);
+  const escaped = normalizedPattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+  return new RegExp(`^${escaped}$`).test(normalizedPath);
 }
 
 function matchScope(host, pattern, payloadHost, payloadPattern) {
@@ -619,6 +629,10 @@ p { margin: 0 0 18px; color: var(--muted); line-height: 1.7; }
   box-shadow: 0 10px 30px rgba(23, 32, 51, .06);
   padding: 22px;
 }
+.grid > .panel > button[type="submit"] {
+  min-width: 108px;
+  margin-top: 14px;
+}
 .table-panel {
   width: min(1180px, calc(100% - 40px));
   margin: 0 auto 18px;
@@ -687,7 +701,26 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   place-items: center;
   padding: 24px;
 }
-.login-panel { width: min(100%, 380px); }
+.login-panel {
+  width: min(100%, 420px);
+  padding: 28px;
+}
+.login-panel p {
+  margin-bottom: 22px;
+}
+.login-panel label {
+  margin-top: 18px;
+}
+.login-panel input {
+  height: 48px;
+  font-size: 16px;
+}
+.login-panel button[type="submit"] {
+  width: 100%;
+  height: 48px;
+  margin-top: 16px;
+  font-size: 16px;
+}
 .error { color: var(--danger); font-weight: 700; }
 @media (max-width: 820px) {
   .grid { grid-template-columns: 1fr; }
