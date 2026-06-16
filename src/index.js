@@ -121,21 +121,30 @@ async function handleRules(request, env) {
   const enabled = form.get("enabled") === "on" ? 1 : 0;
   const note = String(form.get("note") || "").trim();
   const password = String(form.get("password") || "");
+  const autoDisablePasswordConflicts = form.get("autoDisablePasswordConflicts") === "1";
 
   if (!host || !pathPattern) return redirect("/admin?error=rule_required");
 
   let passwordHash = null;
-  if ((mode === "password" || mode === "password_once") && password) {
+  if (isPasswordMode(mode) && password) {
     passwordHash = await hashSecret(password, env);
   }
 
   if (id > 0) {
     const current = await env.ACCESSDOCK_DB.prepare("SELECT * FROM rules WHERE id = ?").bind(id).first();
     passwordHash = passwordHash || current?.password_hash || null;
+    if (isPasswordMode(mode) && !passwordHash) return redirect("/admin?error=password_required");
+    if (enabled && isPasswordMode(mode) && autoDisablePasswordConflicts) {
+      await disablePasswordRuleConflicts(env, host, pathPattern, id);
+    }
     await env.ACCESSDOCK_DB.prepare(
       "UPDATE rules SET host = ?, path_pattern = ?, mode = ?, password_hash = ?, enabled = ?, note = ?, updated_at = ? WHERE id = ?",
     ).bind(host, pathPattern, mode, passwordHash, enabled, note, now, id).run();
   } else {
+    if (isPasswordMode(mode) && !passwordHash) return redirect("/admin?error=password_required");
+    if (enabled && isPasswordMode(mode) && autoDisablePasswordConflicts) {
+      await disablePasswordRuleConflicts(env, host, pathPattern);
+    }
     await env.ACCESSDOCK_DB.prepare(
       "INSERT INTO rules(host, path_pattern, mode, password_hash, enabled, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).bind(host, pathPattern, mode, passwordHash, enabled, note, now, now).run();
@@ -150,6 +159,12 @@ async function handleRuleToggle(request, env) {
   const enabled = Number(form.get("enabled") || 0) ? 0 : 1;
   await env.ACCESSDOCK_DB.prepare("UPDATE rules SET enabled = ?, updated_at = ? WHERE id = ?").bind(enabled, unix(), id).run();
   return redirect("/admin");
+}
+
+async function disablePasswordRuleConflicts(env, host, pathPattern, excludeId = 0) {
+  await env.ACCESSDOCK_DB.prepare(
+    "UPDATE rules SET enabled = 0, updated_at = ? WHERE lower(host) = lower(?) AND path_pattern = ? AND mode IN ('password', 'password_once') AND enabled = 1 AND id <> ?",
+  ).bind(unix(), host, pathPattern, excludeId).run();
 }
 
 async function handleRuleDelete(request, env) {
@@ -187,8 +202,10 @@ async function adminPage(env, request) {
   ]);
   const rules = rulesResult.results || [];
   const codes = codesResult.results || [];
+  const codeRules = uniqueRulesForCodes(rules);
   const generatedCode = url.searchParams.get("code") || "";
   const generatedDuration = url.searchParams.get("duration") || "";
+  const errorMessage = errorLabel(url.searchParams.get("error") || "");
 
   return html(layout({
     title: "AccessDock",
@@ -208,25 +225,34 @@ async function adminPage(env, request) {
         </section>
       ` : ""}
 
+      ${errorMessage ? `
+        <section class="notice error-notice">
+          <span>${escapeHtml(errorMessage)}</span>
+        </section>
+      ` : ""}
+
       <section class="grid">
-        <form class="panel" method="post" action="/admin/rules">
+        <form class="panel" method="post" action="/admin/rules" data-rule-form>
           <h2>新增规则</h2>
           <label>域名</label>
-          <input name="host" placeholder="img.example.com" required>
+          <input name="host" placeholder="img.example.com" required data-rule-host>
           <label>路径规则</label>
-          <input name="pathPattern" placeholder="/file/private/*" required>
+          <input name="pathPattern" placeholder="/file/private/*" required data-rule-path>
           <label>访问模式</label>
-          <select name="mode">
+          <select name="mode" data-rule-mode>
             <option value="password">固定密码</option>
             <option value="password_once">固定密码-每次验证</option>
             <option value="code">临时码</option>
             <option value="admin">仅管理员</option>
           </select>
-          <label>固定密码</label>
-          <input name="password" type="password" placeholder="固定密码模式需要">
+          <div data-password-field>
+            <label>固定密码</label>
+            <input name="password" type="password" placeholder="固定密码模式需要" data-rule-password>
+          </div>
           <label>备注</label>
           <input name="note" placeholder="笔记文件目录">
-          <label class="check"><input name="enabled" type="checkbox" checked> 启用</label>
+          <label class="check"><input name="enabled" type="checkbox" checked data-rule-enabled> 启用</label>
+          <input type="hidden" name="autoDisablePasswordConflicts" value="0" data-auto-disable-conflicts>
           <button type="submit">保存规则</button>
         </form>
 
@@ -234,7 +260,7 @@ async function adminPage(env, request) {
           <h2>生成临时码</h2>
           <label>关联规则</label>
           <select name="ruleId" required>
-            ${rules.map((r) => `<option value="${r.id}">${escapeHtml(r.host)}${escapeHtml(r.path_pattern)}</option>`).join("")}
+            ${codeRules.map((r) => `<option value="${r.id}">${escapeHtml(r.host)}${escapeHtml(r.path_pattern)}</option>`).join("")}
           </select>
           <label>访问有效期</label>
           <select name="duration">
@@ -242,7 +268,7 @@ async function adminPage(env, request) {
           </select>
           <label>备注</label>
           <input name="note" placeholder="发给谁，做什么用">
-          <button type="submit" ${rules.length ? "" : "disabled"}>生成临时码</button>
+          <button type="submit" ${codeRules.length ? "" : "disabled"}>生成临时码</button>
         </form>
       </section>
 
@@ -261,6 +287,70 @@ async function adminPage(env, request) {
           ${codes.map(codeRow).join("") || `<div class="empty">还没有临时码。</div>`}
         </div>
       </section>
+      <script>
+        const existingRules = ${jsonForScript(rules.map((rule) => ({
+          id: rule.id,
+          host: rule.host,
+          pathPattern: rule.path_pattern,
+          mode: rule.mode,
+          enabled: Number(rule.enabled || 0),
+        })))};
+
+        const ruleForm = document.querySelector("[data-rule-form]");
+        const modeSelect = document.querySelector("[data-rule-mode]");
+        const passwordField = document.querySelector("[data-password-field]");
+        const passwordInput = document.querySelector("[data-rule-password]");
+        const hostInput = document.querySelector("[data-rule-host]");
+        const pathInput = document.querySelector("[data-rule-path]");
+        const enabledInput = document.querySelector("[data-rule-enabled]");
+        const autoDisableInput = document.querySelector("[data-auto-disable-conflicts]");
+
+        function isPasswordRuleMode(mode) {
+          return mode === "password" || mode === "password_once";
+        }
+
+        function normalizeHostInput(value) {
+          return String(value || "").trim().replace(/^https?:\\/\\//, "").replace(/\\/.*$/, "").toLowerCase();
+        }
+
+        function normalizePathInput(value) {
+          const trimmed = String(value || "").trim() || "/";
+          return trimmed.startsWith("/") ? trimmed : "/" + trimmed;
+        }
+
+        function syncPasswordField() {
+          const needsPassword = isPasswordRuleMode(modeSelect.value);
+          passwordField.hidden = !needsPassword;
+          passwordInput.required = needsPassword;
+          if (!needsPassword) passwordInput.value = "";
+        }
+
+        modeSelect.addEventListener("change", syncPasswordField);
+        syncPasswordField();
+
+        ruleForm.addEventListener("submit", (event) => {
+          if (!isPasswordRuleMode(modeSelect.value) || !enabledInput.checked || autoDisableInput.value === "1") return;
+
+          const host = normalizeHostInput(hostInput.value);
+          const pathPattern = normalizePathInput(pathInput.value);
+          const conflicts = existingRules.filter((rule) =>
+            rule.enabled &&
+            isPasswordRuleMode(rule.mode) &&
+            normalizeHostInput(rule.host) === host &&
+            normalizePathInput(rule.pathPattern) === pathPattern
+          );
+
+          if (!conflicts.length) return;
+
+          const confirmed = confirm("已存在相同域名和路径的启用固定密码规则。是否停用旧规则并保存当前规则？");
+          if (!confirmed) {
+            event.preventDefault();
+            return;
+          }
+
+          autoDisableInput.value = "1";
+        });
+      </script>
     `,
   }));
 }
@@ -275,7 +365,7 @@ function ruleRow(rule) {
       <form method="post" action="/admin/rules/toggle">
         <input type="hidden" name="id" value="${rule.id}">
         <input type="hidden" name="enabled" value="${rule.enabled}">
-        <button class="mini" type="submit">${rule.enabled ? "停用" : "启用"}</button>
+        <button class="mini ${rule.enabled ? "warning" : "success"}" type="submit">${rule.enabled ? "停用" : "启用"}</button>
       </form>
       <form method="post" action="/admin/rules/delete">
         <input type="hidden" name="id" value="${rule.id}">
@@ -354,7 +444,13 @@ async function findMatchingRule(env, host, path) {
   ).bind(host).all();
   const matches = (result.results || [])
     .filter((rule) => wildcardMatch(path, rule.path_pattern))
-    .sort((a, b) => b.path_pattern.length - a.path_pattern.length);
+    .sort((a, b) => {
+      const pathDiff = b.path_pattern.length - a.path_pattern.length;
+      if (pathDiff) return pathDiff;
+      const updatedDiff = Number(b.updated_at || 0) - Number(a.updated_at || 0);
+      if (updatedDiff) return updatedDiff;
+      return Number(b.id || 0) - Number(a.id || 0);
+    });
   return matches[0] || null;
 }
 
@@ -496,8 +592,52 @@ function unix() {
   return Math.floor(Date.now() / 1000);
 }
 
+function isPasswordMode(mode) {
+  return mode === "password" || mode === "password_once";
+}
+
+function uniqueRulesForCodes(rules) {
+  const byScope = new Map();
+  const sorted = [...rules].sort((a, b) => {
+    const enabledDiff = Number(b.enabled || 0) - Number(a.enabled || 0);
+    if (enabledDiff) return enabledDiff;
+    const updatedDiff = Number(b.updated_at || 0) - Number(a.updated_at || 0);
+    if (updatedDiff) return updatedDiff;
+    return Number(b.id || 0) - Number(a.id || 0);
+  });
+
+  for (const rule of sorted) {
+    if (!Number(rule.enabled || 0)) continue;
+    const key = `${String(rule.host || "").toLowerCase()}\n${String(rule.path_pattern || "")}`;
+    if (!byScope.has(key)) byScope.set(key, rule);
+  }
+
+  return [...byScope.values()].sort((a, b) => {
+    const hostCompare = String(a.host || "").localeCompare(String(b.host || ""), "zh-CN");
+    if (hostCompare) return hostCompare;
+    return String(a.path_pattern || "").localeCompare(String(b.path_pattern || ""), "zh-CN");
+  });
+}
+
 function modeLabel(mode) {
   return { password: "固定密码", password_once: "固定密码-每次验证", code: "临时码", admin: "仅管理员" }[mode] || mode;
+}
+
+function errorLabel(error) {
+  return {
+    rule_required: "请填写域名和路径规则。",
+    password_required: "固定密码模式需要填写固定密码。",
+    missing_rule: "没有找到关联规则。",
+  }[error] || "";
+}
+
+function jsonForScript(value) {
+  return JSON.stringify(value)
+    .replaceAll("<", "\\u003c")
+    .replaceAll(">", "\\u003e")
+    .replaceAll("&", "\\u0026")
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
 }
 
 function formatTime(value) {
@@ -675,7 +815,10 @@ button, .ghost {
 button:disabled { opacity: .5; cursor: not-allowed; }
 .ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
 .mini { height: 30px; padding: 0 10px; font-size: 12px; }
+.success { background: #0f766e; color: #fff; }
+.warning { background: #b45309; color: #fff; }
 .danger { background: #fff; color: var(--danger); border: 1px solid #f2c6c2; }
+[hidden] { display: none !important; }
 .table { display: grid; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .thead, .tr { display: grid; grid-template-columns: 90px 1.5fr 110px 1fr 140px; align-items: center; gap: 12px; padding: 12px 14px; }
 .codes .thead, .codes .tr { grid-template-columns: 90px 1.6fr 180px 1fr; }
@@ -700,6 +843,12 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   font-size: 22px;
   font-weight: 800;
   color: var(--ink);
+}
+.error-notice {
+  border-color: #f2c6c2;
+  background: #fff1f0;
+  color: var(--danger);
+  font-weight: 700;
 }
 .login {
   min-height: 100vh;
