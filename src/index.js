@@ -63,9 +63,14 @@ async function handleLogin(request, env) {
     return redirect(returnUrl);
   }
 
-  if (rule.mode === "password" && rule.password_hash) {
+  if ((rule.mode === "password" || rule.mode === "password_once") && rule.password_hash) {
     const hash = await hashSecret(password, env);
     if (timingSafeEqual(hash, rule.password_hash)) {
+      if (rule.mode === "password_once") {
+        const grant = await createOneTimeGrant(rule, env);
+        return redirect(appendQuery(returnUrl, "ad_grant", grant));
+      }
+
       const seconds = Number(env.DEFAULT_ACCESS_SECONDS || DEFAULT_ACCESS_SECONDS);
       const token = await createToken({ type: "access", ruleId: rule.id, host: rule.host, pathPattern: rule.path_pattern }, seconds, env);
       return redirect(returnUrl, [setCookie(getAccessCookieName(env), token, seconds, env)]);
@@ -112,7 +117,7 @@ async function handleRules(request, env) {
   const id = Number(form.get("id") || 0);
   const host = normalizeHost(String(form.get("host") || ""));
   const pathPattern = normalizePathPattern(String(form.get("pathPattern") || ""));
-  const mode = ["password", "code", "admin"].includes(String(form.get("mode"))) ? String(form.get("mode")) : "password";
+  const mode = ["password", "password_once", "code", "admin"].includes(String(form.get("mode"))) ? String(form.get("mode")) : "password";
   const enabled = form.get("enabled") === "on" ? 1 : 0;
   const note = String(form.get("note") || "").trim();
   const password = String(form.get("password") || "");
@@ -120,7 +125,7 @@ async function handleRules(request, env) {
   if (!host || !pathPattern) return redirect("/admin?error=rule_required");
 
   let passwordHash = null;
-  if (mode === "password" && password) {
+  if ((mode === "password" || mode === "password_once") && password) {
     passwordHash = await hashSecret(password, env);
   }
 
@@ -213,11 +218,12 @@ async function adminPage(env, request) {
           <label>访问模式</label>
           <select name="mode">
             <option value="password">固定密码</option>
+            <option value="password_once">固定密码-每次验证</option>
             <option value="code">临时码</option>
             <option value="admin">仅管理员</option>
           </select>
           <label>固定密码</label>
-          <input name="password" type="password" placeholder="仅固定密码模式需要">
+          <input name="password" type="password" placeholder="固定密码模式需要">
           <label>备注</label>
           <input name="note" placeholder="笔记文件目录">
           <label class="check"><input name="enabled" type="checkbox" checked> 启用</label>
@@ -491,7 +497,7 @@ function unix() {
 }
 
 function modeLabel(mode) {
-  return { password: "固定密码", code: "临时码", admin: "仅管理员" }[mode] || mode;
+  return { password: "固定密码", password_once: "固定密码-每次验证", code: "临时码", admin: "仅管理员" }[mode] || mode;
 }
 
 function formatTime(value) {

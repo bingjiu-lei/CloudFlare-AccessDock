@@ -15,6 +15,7 @@ https://access.example.com
 - Runtime rule management from `/admin`
 - Host + path pattern matching, such as `files.example.com/private/*`
 - Fixed password access
+- Fixed password access that requires re-authentication after refresh
 - Temporary access codes
 - Admin-only access
 - One-time access flow: refresh after access will require login again
@@ -147,8 +148,9 @@ Rules are stored in D1 and become effective immediately after saving. No redeplo
 
 ```text
 password  Fixed password for the matched route
-code      Temporary access code for the matched route
-admin     Admin session required
+password_once  Fixed password without persistent login; refresh requires login again
+code           Temporary access code for the matched route
+admin          Admin session required
 ```
 
 Temporary codes can be created from the admin console. They support:
