@@ -58,13 +58,13 @@ async function handleLogin(request, env) {
     return loginPage(env, { returnUrl, error: "请输入管理员密码。" }, 401);
   }
 
-  const rule = await findMatchingRule(env, target.host, target.path);
-  if (!rule) {
+  const rules = await findMatchingRules(env, target.host, target.path);
+  if (!rules.length) {
     return redirect(returnUrl);
   }
 
-  if ((rule.mode === "password" || rule.mode === "password_once") && rule.password_hash) {
-    const hash = await hashSecret(password, env);
+  const hash = await hashSecret(password, env);
+  for (const rule of rules.filter((item) => isPasswordMode(item.mode) && item.password_hash)) {
     if (timingSafeEqual(hash, rule.password_hash)) {
       if (rule.mode === "password_once") {
         const grant = await createOneTimeGrant(rule, env);
@@ -77,8 +77,9 @@ async function handleLogin(request, env) {
     }
   }
 
-  const codeResult = await consumeCode(password, rule, env);
+  const codeResult = await consumeCodeForRules(password, rules, env);
   if (codeResult.ok) {
+    const rule = codeResult.rule;
     if (codeResult.sessionSeconds > 0) {
       const token = await createToken({ type: "access", ruleId: rule.id, host: rule.host, pathPattern: rule.path_pattern }, codeResult.sessionSeconds, env);
       return redirect(returnUrl, [setCookie(getAccessCookieName(env), token, codeResult.sessionSeconds, env)]);
@@ -97,15 +98,18 @@ async function handleCheck(request, env) {
   const target = parseTarget(returnUrl);
   if (!target) return json({ allowed: false, loginUrl: loginUrl(env, returnUrl), reason: "missing_target" }, 400);
 
-  const rule = await findMatchingRule(env, target.host, target.path);
-  if (!rule) return json({ allowed: true, protected: false });
+  const rules = await findMatchingRules(env, target.host, target.path);
+  if (!rules.length) return json({ allowed: true, protected: false });
+  const rule = rules[0];
 
   if (await hasAdminSession(request, env)) return json({ allowed: true, protected: true, role: "admin", rule });
-  if (await hasAccessSession(request, env, rule)) return json({ allowed: true, protected: true, role: "access", rule });
+  const accessRule = await findAccessSessionRule(request, env, rules);
+  if (accessRule) return json({ allowed: true, protected: true, role: "access", rule: accessRule });
 
   const grantToken = new URL(returnUrl).searchParams.get("ad_grant");
-  if (grantToken && await consumeGrant(grantToken, rule, env)) {
-    return json({ allowed: true, protected: true, role: "grant", rule });
+  if (grantToken) {
+    const grantRule = await consumeGrantForRules(grantToken, rules, env);
+    if (grantRule) return json({ allowed: true, protected: true, role: "grant", rule: grantRule });
   }
 
   return json({ allowed: false, protected: true, loginUrl: loginUrl(env, returnUrl), reason: "login_required", rule }, 401);
@@ -121,7 +125,6 @@ async function handleRules(request, env) {
   const enabled = form.get("enabled") === "on" ? 1 : 0;
   const note = String(form.get("note") || "").trim();
   const password = String(form.get("password") || "");
-  const autoDisablePasswordConflicts = form.get("autoDisablePasswordConflicts") === "1";
 
   if (!host || !pathPattern) return redirect("/admin?error=rule_required");
 
@@ -134,17 +137,13 @@ async function handleRules(request, env) {
     const current = await env.ACCESSDOCK_DB.prepare("SELECT * FROM rules WHERE id = ?").bind(id).first();
     passwordHash = passwordHash || current?.password_hash || null;
     if (isPasswordMode(mode) && !passwordHash) return redirect("/admin?error=password_required");
-    if (enabled && isPasswordMode(mode) && autoDisablePasswordConflicts) {
-      await disablePasswordRuleConflicts(env, host, pathPattern, id);
-    }
+    if (enabled && await hasEnabledSameModeRule(env, host, pathPattern, mode, id)) return redirect("/admin?error=duplicate_rule");
     await env.ACCESSDOCK_DB.prepare(
       "UPDATE rules SET host = ?, path_pattern = ?, mode = ?, password_hash = ?, enabled = ?, note = ?, updated_at = ? WHERE id = ?",
     ).bind(host, pathPattern, mode, passwordHash, enabled, note, now, id).run();
   } else {
     if (isPasswordMode(mode) && !passwordHash) return redirect("/admin?error=password_required");
-    if (enabled && isPasswordMode(mode) && autoDisablePasswordConflicts) {
-      await disablePasswordRuleConflicts(env, host, pathPattern);
-    }
+    if (enabled && await hasEnabledSameModeRule(env, host, pathPattern, mode)) return redirect("/admin?error=duplicate_rule");
     await env.ACCESSDOCK_DB.prepare(
       "INSERT INTO rules(host, path_pattern, mode, password_hash, enabled, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).bind(host, pathPattern, mode, passwordHash, enabled, note, now, now).run();
@@ -157,14 +156,20 @@ async function handleRuleToggle(request, env) {
   const form = await request.formData();
   const id = Number(form.get("id") || 0);
   const enabled = Number(form.get("enabled") || 0) ? 0 : 1;
+  const current = await env.ACCESSDOCK_DB.prepare("SELECT * FROM rules WHERE id = ?").bind(id).first();
+  if (!current) return redirect("/admin?error=missing_rule");
+  if (enabled && await hasEnabledSameModeRule(env, current.host, current.path_pattern, current.mode, id)) {
+    return redirect("/admin?error=duplicate_rule");
+  }
   await env.ACCESSDOCK_DB.prepare("UPDATE rules SET enabled = ?, updated_at = ? WHERE id = ?").bind(enabled, unix(), id).run();
   return redirect("/admin");
 }
 
-async function disablePasswordRuleConflicts(env, host, pathPattern, excludeId = 0) {
-  await env.ACCESSDOCK_DB.prepare(
-    "UPDATE rules SET enabled = 0, updated_at = ? WHERE lower(host) = lower(?) AND path_pattern = ? AND mode IN ('password', 'password_once') AND enabled = 1 AND id <> ?",
-  ).bind(unix(), host, pathPattern, excludeId).run();
+async function hasEnabledSameModeRule(env, host, pathPattern, mode, excludeId = 0) {
+  const row = await env.ACCESSDOCK_DB.prepare(
+    "SELECT id FROM rules WHERE enabled = 1 AND lower(host) = lower(?) AND path_pattern = ? AND mode = ? AND id <> ? LIMIT 1",
+  ).bind(host, pathPattern, mode, excludeId).first();
+  return Boolean(row);
 }
 
 async function handleRuleDelete(request, env) {
@@ -252,7 +257,6 @@ async function adminPage(env, request) {
           <label>备注</label>
           <input name="note" placeholder="笔记文件目录">
           <label class="check"><input name="enabled" type="checkbox" checked data-rule-enabled> 启用</label>
-          <input type="hidden" name="autoDisablePasswordConflicts" value="0" data-auto-disable-conflicts>
           <button type="submit">保存规则</button>
         </form>
 
@@ -303,7 +307,6 @@ async function adminPage(env, request) {
         const hostInput = document.querySelector("[data-rule-host]");
         const pathInput = document.querySelector("[data-rule-path]");
         const enabledInput = document.querySelector("[data-rule-enabled]");
-        const autoDisableInput = document.querySelector("[data-auto-disable-conflicts]");
 
         function isPasswordRuleMode(mode) {
           return mode === "password" || mode === "password_once";
@@ -329,26 +332,21 @@ async function adminPage(env, request) {
         syncPasswordField();
 
         ruleForm.addEventListener("submit", (event) => {
-          if (!isPasswordRuleMode(modeSelect.value) || !enabledInput.checked || autoDisableInput.value === "1") return;
+          if (!enabledInput.checked) return;
 
           const host = normalizeHostInput(hostInput.value);
           const pathPattern = normalizePathInput(pathInput.value);
-          const conflicts = existingRules.filter((rule) =>
+          const hasDuplicateMode = existingRules.some((rule) =>
             rule.enabled &&
-            isPasswordRuleMode(rule.mode) &&
+            rule.mode === modeSelect.value &&
             normalizeHostInput(rule.host) === host &&
             normalizePathInput(rule.pathPattern) === pathPattern
           );
 
-          if (!conflicts.length) return;
-
-          const confirmed = confirm("已存在相同域名和路径的启用固定密码规则。是否停用旧规则并保存当前规则？");
-          if (!confirmed) {
+          if (hasDuplicateMode) {
+            alert("已存在相同域名、路径和访问模式的启用规则，请先停用旧规则。");
             event.preventDefault();
-            return;
           }
-
-          autoDisableInput.value = "1";
         });
       </script>
     `,
@@ -406,6 +404,13 @@ async function hasAccessSession(request, env, rule) {
   return Number(payload.ruleId) === Number(rule.id) || matchScope(rule.host, rule.path_pattern, payload.host, payload.pathPattern);
 }
 
+async function findAccessSessionRule(request, env, rules) {
+  for (const rule of rules) {
+    if (await hasAccessSession(request, env, rule)) return rule;
+  }
+  return null;
+}
+
 async function createOneTimeGrant(rule, env) {
   const id = crypto.randomUUID();
   const expiresAt = unix() + ONE_TIME_GRANT_SECONDS;
@@ -424,6 +429,13 @@ async function consumeGrant(token, rule, env) {
   return true;
 }
 
+async function consumeGrantForRules(token, rules, env) {
+  for (const rule of rules) {
+    if (await consumeGrant(token, rule, env)) return rule;
+  }
+  return null;
+}
+
 async function consumeCode(input, rule, env) {
   const codeHash = await hashSecret(normalizeCode(input), env);
   const row = await env.ACCESSDOCK_DB.prepare(
@@ -438,7 +450,17 @@ async function consumeCode(input, rule, env) {
   return { ok: true, sessionSeconds: Number(row.session_seconds || 0) };
 }
 
-async function findMatchingRule(env, host, path) {
+async function consumeCodeForRules(input, rules, env) {
+  let message = "";
+  for (const rule of rules) {
+    const result = await consumeCode(input, rule, env);
+    if (result.ok) return { ...result, rule };
+    if (result.message !== "密码或临时码不正确。") message = result.message;
+  }
+  return { ok: false, message: message || "密码或临时码不正确。" };
+}
+
+async function findMatchingRules(env, host, path) {
   const result = await env.ACCESSDOCK_DB.prepare(
     "SELECT * FROM rules WHERE enabled = 1 AND lower(host) = lower(?)",
   ).bind(host).all();
@@ -451,7 +473,7 @@ async function findMatchingRule(env, host, path) {
       if (updatedDiff) return updatedDiff;
       return Number(b.id || 0) - Number(a.id || 0);
     });
-  return matches[0] || null;
+  return matches;
 }
 
 async function cleanupExpired(env) {
@@ -628,6 +650,7 @@ function errorLabel(error) {
     rule_required: "请填写域名和路径规则。",
     password_required: "固定密码模式需要填写固定密码。",
     missing_rule: "没有找到关联规则。",
+    duplicate_rule: "已存在相同域名、路径和访问模式的启用规则，请先停用旧规则。",
   }[error] || "";
 }
 
