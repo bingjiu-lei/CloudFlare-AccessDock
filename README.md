@@ -174,6 +174,19 @@ Configure the protected project:
 ACCESSDOCK_BASE_URL=https://auth.example.com
 ```
 
+Optionally add a Service Binding named `ACCESSDOCK` that targets the
+AccessDock Worker. The helper prefers the binding when present and falls back
+to the public URL when it is absent:
+
+```toml
+[[services]]
+binding = "ACCESSDOCK"
+service = "cloudflare-accessdock"
+```
+
+Use the actual deployed Worker name for non-production environments, for
+example `cloudflare-accessdock-staging`.
+
 Call `checkAccess` before returning protected content:
 
 ```js
@@ -204,6 +217,9 @@ Wildcard `*` is supported:
 ```
 
 If no enabled rule matches a request, AccessDock returns `allowed: true`.
+When a protected request needs authentication, AccessDock intentionally
+returns `401` with a JSON `loginUrl`. The reusable helper parses that response
+and redirects the browser instead of treating the status as a service error.
 
 ## Example
 
