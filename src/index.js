@@ -24,7 +24,7 @@ export default {
     if (url.pathname === "/") return redirect("/admin");
     if (url.pathname === "/admin") return requireAdmin(request, env, () => adminPage(env, request));
     if (url.pathname === "/login") return handleLogin(request, env);
-    if (url.pathname === "/logout") return redirect("/login", [clearCookie(getAdminCookieName(env))]);
+    if (url.pathname === "/logout") return redirect("/login", clearCookies(getAdminCookieName(env), env));
     if (url.pathname === "/api/check") return handleCheck(request, env);
     if (url.pathname === "/admin/rules") return requireAdmin(request, env, () => handleRules(request, env));
     if (url.pathname === "/admin/rules/toggle") return requireAdmin(request, env, () => handleRuleToggle(request, env));
@@ -50,7 +50,7 @@ async function handleLogin(request, env) {
 
   if (password === env.ADMIN_PASSWORD) {
     const token = await createToken({ type: "admin" }, ADMIN_SESSION_SECONDS, env);
-    return redirect(returnUrl, [setCookie(getAdminCookieName(env), token, ADMIN_SESSION_SECONDS, env)]);
+    return redirect(returnUrl, replaceCookie(getAdminCookieName(env), token, ADMIN_SESSION_SECONDS, env), 303);
   }
 
   const target = parseTarget(returnUrl);
@@ -73,7 +73,7 @@ async function handleLogin(request, env) {
 
       const seconds = Number(env.DEFAULT_ACCESS_SECONDS || DEFAULT_ACCESS_SECONDS);
       const token = await createToken({ type: "access", ruleId: rule.id, host: rule.host, pathPattern: rule.path_pattern }, seconds, env);
-      return redirect(returnUrl, [setCookie(getAccessCookieName(env), token, seconds, env)]);
+      return redirect(returnUrl, replaceCookie(getAccessCookieName(env), token, seconds, env), 303);
     }
   }
 
@@ -82,7 +82,7 @@ async function handleLogin(request, env) {
     const rule = codeResult.rule;
     if (codeResult.sessionSeconds > 0) {
       const token = await createToken({ type: "access", ruleId: rule.id, host: rule.host, pathPattern: rule.path_pattern }, codeResult.sessionSeconds, env);
-      return redirect(returnUrl, [setCookie(getAccessCookieName(env), token, codeResult.sessionSeconds, env)]);
+      return redirect(returnUrl, replaceCookie(getAccessCookieName(env), token, codeResult.sessionSeconds, env), 303);
     }
 
     const grant = await createOneTimeGrant(rule, env);
@@ -392,16 +392,20 @@ async function requireAdmin(request, env, next) {
 }
 
 async function hasAdminSession(request, env) {
-  const token = getCookie(request, getAdminCookieName(env));
-  const payload = await verifyToken(token, env);
-  return payload?.type === "admin";
+  for (const token of getCookies(request, getAdminCookieName(env))) {
+    const payload = await verifyToken(token, env);
+    if (payload?.type === "admin") return true;
+  }
+  return false;
 }
 
 async function hasAccessSession(request, env, rule) {
-  const token = getCookie(request, getAccessCookieName(env));
-  const payload = await verifyToken(token, env);
-  if (payload?.type !== "access") return false;
-  return Number(payload.ruleId) === Number(rule.id) || matchScope(rule.host, rule.path_pattern, payload.host, payload.pathPattern);
+  for (const token of getCookies(request, getAccessCookieName(env))) {
+    const payload = await verifyToken(token, env);
+    if (payload?.type !== "access") continue;
+    if (Number(payload.ruleId) === Number(rule.id) || matchScope(rule.host, rule.path_pattern, payload.host, payload.pathPattern)) return true;
+  }
+  return false;
 }
 
 async function findAccessSessionRule(request, env, rules) {
@@ -556,14 +560,27 @@ function setCookie(name, value, maxAge, env) {
   return `${name}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax${domain}`;
 }
 
-function clearCookie(name) {
-  return `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+function replaceCookie(name, value, maxAge, env) {
+  // Older deployments may have created a host-only cookie with the same name.
+  // Expire it before writing the shared-domain cookie so browsers cannot send
+  // two values in an implementation-dependent order.
+  return [...clearCookies(name, env), setCookie(name, value, maxAge, env)];
 }
 
-function getCookie(request, name) {
+function clearCookies(name, env) {
+  const attributes = "; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
+  const cookies = [`${name}=${attributes}`];
+  if (env.COOKIE_DOMAIN) cookies.push(`${name}=${attributes}; Domain=${env.COOKIE_DOMAIN}`);
+  return cookies;
+}
+
+function getCookies(request, name) {
   const cookies = request.headers.get("cookie") || "";
-  const item = cookies.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
-  return item ? item.slice(name.length + 1) : "";
+  return cookies
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith(`${name}=`))
+    .map((part) => part.slice(name.length + 1));
 }
 
 function getAdminCookieName(env) {
@@ -703,10 +720,10 @@ function html(content, status = 200) {
   });
 }
 
-function redirect(location, cookies = []) {
+function redirect(location, cookies = [], status = 302) {
   const headers = new Headers({ location, "cache-control": "no-store" });
   for (const cookie of cookies) headers.append("set-cookie", cookie);
-  return new Response(null, { status: 302, headers });
+  return new Response(null, { status, headers });
 }
 
 function notFound() {

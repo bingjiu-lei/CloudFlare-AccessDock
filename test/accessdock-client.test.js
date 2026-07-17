@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { checkAccess } from "../client/accessdock-client.js";
+import worker from "../src/index.js";
 
 const protectedRequest = new Request("https://app.example.com/private");
 
@@ -63,4 +64,66 @@ test("treats a 401 login response as an authentication redirect", async () => {
   assert.equal(result.ok, false);
   assert.equal(result.response.status, 302);
   assert.equal(result.response.headers.get("location"), loginUrl);
+});
+
+function createAccessDockEnv() {
+  const statement = {
+    bind() {
+      return this;
+    },
+    async run() {
+      return {};
+    },
+    async all() {
+      return { results: [] };
+    },
+  };
+
+  return {
+    ADMIN_PASSWORD: "admin-password",
+    COOKIE_DOMAIN: ".example.com",
+    SESSION_SECRET: "test-session-secret",
+    ACCESSDOCK_DB: {
+      prepare() {
+        return statement;
+      },
+    },
+  };
+}
+
+test("accepts a valid admin cookie when an older duplicate appears first", async () => {
+  const env = createAccessDockEnv();
+  const login = await worker.fetch(
+    new Request("https://auth.example.com/login", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "password=admin-password&return=%2Fadmin",
+    }),
+    env,
+  );
+
+  assert.equal(login.status, 303);
+  const sessionCookie = login.headers
+    .getSetCookie()
+    .find((cookie) => cookie.startsWith("accessdock_admin=") && cookie.includes("Max-Age=2592000"));
+  const token = sessionCookie.match(/^accessdock_admin=([^;]+)/)[1];
+
+  const admin = await worker.fetch(
+    new Request("https://auth.example.com/admin", {
+      headers: { cookie: `accessdock_admin=expired-or-invalid; accessdock_admin=${token}` },
+    }),
+    env,
+  );
+
+  assert.equal(admin.status, 200);
+});
+
+test("clears both host-only and shared-domain administrator cookies on logout", async () => {
+  const response = await worker.fetch(new Request("https://auth.example.com/logout"), createAccessDockEnv());
+
+  assert.equal(response.status, 302);
+  assert.deepEqual(response.headers.getSetCookie(), [
+    "accessdock_admin=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
+    "accessdock_admin=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax; Domain=.example.com",
+  ]);
 });
