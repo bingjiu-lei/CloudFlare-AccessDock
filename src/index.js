@@ -1,3 +1,5 @@
+import { renderAdminPage, renderLoginPage } from "./ui.js";
+
 const ADMIN_COOKIE = "accessdock_admin";
 const DEFAULT_ACCESS_SECONDS = 60 * 60 * 24;
 const ADMIN_SESSION_SECONDS = 60 * 60 * 24 * 30;
@@ -38,8 +40,11 @@ export default {
 async function handleLogin(request, env) {
   if (request.method === "GET") {
     const url = new URL(request.url);
+    const returnUrl = sanitizeReturnUrl(url.searchParams.get("return") || "/admin");
+    const target = parseTarget(returnUrl);
     return loginPage(env, {
-      returnUrl: sanitizeReturnUrl(url.searchParams.get("return") || "/admin"),
+      returnUrl,
+      target,
       error: url.searchParams.get("error") || "",
     });
   }
@@ -55,7 +60,7 @@ async function handleLogin(request, env) {
 
   const target = parseTarget(returnUrl);
   if (!target) {
-    return loginPage(env, { returnUrl, error: "请输入管理员密码。" }, 401);
+    return loginPage(env, { returnUrl, target, error: "请输入管理员密码。" }, 401);
   }
 
   const rules = await findMatchingRules(env, target.host, target.path);
@@ -89,7 +94,7 @@ async function handleLogin(request, env) {
     return redirect(appendQuery(returnUrl, "ad_grant", grant));
   }
 
-  return loginPage(env, { returnUrl, error: codeResult.message || "密码或临时码不正确。" }, 401);
+  return loginPage(env, { returnUrl, target, error: codeResult.message || "密码或临时码不正确。" }, 401);
 }
 
 async function handleCheck(request, env) {
@@ -212,178 +217,24 @@ async function adminPage(env, request) {
   const generatedDuration = url.searchParams.get("duration") || "";
   const errorMessage = errorLabel(url.searchParams.get("error") || "");
 
-  return html(layout({
-    title: "AccessDock",
-    body: `
-      <section class="topbar">
-        <div>
-          <div class="eyebrow">AccessDock</div>
-          <h1>访问控制台</h1>
-        </div>
-        <a class="ghost" href="/logout">退出</a>
-      </section>
+  const existingRulesJson = jsonForScript(rules.map((rule) => ({
+    id: rule.id,
+    host: rule.host,
+    pathPattern: rule.path_pattern,
+    mode: rule.mode,
+    enabled: Number(rule.enabled || 0),
+  })));
 
-      ${generatedCode ? `
-        <section class="notice">
-          <span>临时码已生成：${escapeHtml(generatedDuration)}</span>
-          <code>${escapeHtml(generatedCode)}</code>
-        </section>
-      ` : ""}
-
-      ${errorMessage ? `
-        <section class="notice error-notice">
-          <span>${escapeHtml(errorMessage)}</span>
-        </section>
-      ` : ""}
-
-      <section class="grid">
-        <form class="panel" method="post" action="/admin/rules" data-rule-form>
-          <h2>新增规则</h2>
-          <label>域名</label>
-          <input name="host" placeholder="img.example.com" required data-rule-host>
-          <label>路径规则</label>
-          <input name="pathPattern" placeholder="/file/private/*" required data-rule-path>
-          <label>访问模式</label>
-          <select name="mode" data-rule-mode>
-            <option value="password">固定密码</option>
-            <option value="password_once">固定密码-每次验证</option>
-            <option value="code">临时码</option>
-            <option value="admin">仅管理员</option>
-          </select>
-          <div data-password-field>
-            <label>固定密码</label>
-            <input name="password" type="password" placeholder="固定密码模式需要" data-rule-password>
-          </div>
-          <label>备注</label>
-          <input name="note" placeholder="笔记文件目录">
-          <label class="check"><input name="enabled" type="checkbox" checked data-rule-enabled> 启用</label>
-          <button type="submit">保存规则</button>
-        </form>
-
-        <form class="panel" method="post" action="/admin/codes">
-          <h2>生成临时码</h2>
-          <label>关联规则</label>
-          <select name="ruleId" required>
-            ${codeRules.map((r) => `<option value="${r.id}">${escapeHtml(r.host)}${escapeHtml(r.path_pattern)}</option>`).join("")}
-          </select>
-          <label>访问有效期</label>
-          <select name="duration">
-            ${Object.entries(CODE_DURATIONS).map(([key, value]) => `<option value="${key}">${escapeHtml(value.label)}</option>`).join("")}
-          </select>
-          <label>备注</label>
-          <input name="note" placeholder="发给谁，做什么用">
-          <button type="submit" ${codeRules.length ? "" : "disabled"}>生成临时码</button>
-        </form>
-      </section>
-
-      <section class="panel table-panel">
-        <h2>规则列表</h2>
-        <div class="table">
-          <div class="thead"><span>状态</span><span>匹配范围</span><span>模式</span><span>备注</span><span>操作</span></div>
-          ${rules.map(ruleRow).join("") || `<div class="empty">还没有规则。</div>`}
-        </div>
-      </section>
-
-      <section class="panel table-panel">
-        <h2>最近临时码</h2>
-        <div class="table codes">
-          <div class="thead"><span>状态</span><span>规则</span><span>有效期</span><span>备注</span></div>
-          ${codes.map(codeRow).join("") || `<div class="empty">还没有临时码。</div>`}
-        </div>
-      </section>
-      <script>
-        const existingRules = ${jsonForScript(rules.map((rule) => ({
-          id: rule.id,
-          host: rule.host,
-          pathPattern: rule.path_pattern,
-          mode: rule.mode,
-          enabled: Number(rule.enabled || 0),
-        })))};
-
-        const ruleForm = document.querySelector("[data-rule-form]");
-        const modeSelect = document.querySelector("[data-rule-mode]");
-        const passwordField = document.querySelector("[data-password-field]");
-        const passwordInput = document.querySelector("[data-rule-password]");
-        const hostInput = document.querySelector("[data-rule-host]");
-        const pathInput = document.querySelector("[data-rule-path]");
-        const enabledInput = document.querySelector("[data-rule-enabled]");
-
-        function isPasswordRuleMode(mode) {
-          return mode === "password" || mode === "password_once";
-        }
-
-        function normalizeHostInput(value) {
-          return String(value || "").trim().replace(/^https?:\\/\\//, "").replace(/\\/.*$/, "").toLowerCase();
-        }
-
-        function normalizePathInput(value) {
-          const trimmed = String(value || "").trim() || "/";
-          return trimmed.startsWith("/") ? trimmed : "/" + trimmed;
-        }
-
-        function syncPasswordField() {
-          const needsPassword = isPasswordRuleMode(modeSelect.value);
-          passwordField.hidden = !needsPassword;
-          passwordInput.required = needsPassword;
-          if (!needsPassword) passwordInput.value = "";
-        }
-
-        modeSelect.addEventListener("change", syncPasswordField);
-        syncPasswordField();
-
-        ruleForm.addEventListener("submit", (event) => {
-          if (!enabledInput.checked) return;
-
-          const host = normalizeHostInput(hostInput.value);
-          const pathPattern = normalizePathInput(pathInput.value);
-          const hasDuplicateMode = existingRules.some((rule) =>
-            rule.enabled &&
-            rule.mode === modeSelect.value &&
-            normalizeHostInput(rule.host) === host &&
-            normalizePathInput(rule.pathPattern) === pathPattern
-          );
-
-          if (hasDuplicateMode) {
-            alert("已存在相同域名、路径和访问模式的启用规则，请先停用旧规则。");
-            event.preventDefault();
-          }
-        });
-      </script>
-    `,
+  return html(renderAdminPage({
+    rules,
+    codes,
+    codeRules,
+    generatedCode,
+    generatedDuration,
+    errorMessage,
+    existingRulesJson,
+    codeDurations: CODE_DURATIONS,
   }));
-}
-
-function ruleRow(rule) {
-  return `<div class="tr">
-    <span><strong class="${rule.enabled ? "ok" : "muted"}">${rule.enabled ? "启用" : "停用"}</strong></span>
-    <span><b>${escapeHtml(rule.host)}</b><small>${escapeHtml(rule.path_pattern)}</small></span>
-    <span>${modeLabel(rule.mode)}</span>
-    <span>${escapeHtml(rule.note || "-")}</span>
-    <span class="actions">
-      <form method="post" action="/admin/rules/toggle">
-        <input type="hidden" name="id" value="${rule.id}">
-        <input type="hidden" name="enabled" value="${rule.enabled}">
-        <button class="mini ${rule.enabled ? "warning" : "success"}" type="submit">${rule.enabled ? "停用" : "启用"}</button>
-      </form>
-      <form method="post" action="/admin/rules/delete">
-        <input type="hidden" name="id" value="${rule.id}">
-        <button class="mini danger" type="submit">删除</button>
-      </form>
-    </span>
-  </div>`;
-}
-
-function codeRow(code) {
-  const now = unix();
-  const used = code.used_count >= code.max_uses;
-  const expired = now > code.expires_at;
-  const status = used ? "已使用" : expired ? "已过期" : "可用";
-  return `<div class="tr">
-    <span><strong class="${status === "可用" ? "ok" : "muted"}">${status}</strong></span>
-    <span><b>${escapeHtml(code.host || "")}</b><small>${escapeHtml(code.path_pattern || "")}</small></span>
-    <span>${formatTime(code.expires_at)}</span>
-    <span>${escapeHtml(code.note || "-")}</span>
-  </div>`;
 }
 
 async function requireAdmin(request, env, next) {
@@ -730,203 +581,8 @@ function notFound() {
   return new Response("Not Found", { status: 404 });
 }
 
-function loginPage(env, { returnUrl, error }, status = 200) {
-  return html(layout({
-    title: "登录",
-    body: `<main class="login">
-      <form class="panel login-panel" method="post" action="/login">
-        <div class="eyebrow">AccessDock</div>
-        <h1>访问验证</h1>
-        <p>请输入管理员密码、访问密码或临时码。</p>
-        ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
-        <input type="hidden" name="return" value="${escapeHtml(returnUrl)}">
-        <label>访问凭证</label>
-        <input name="password" type="password" autocomplete="current-password" autofocus required>
-        <button type="submit">继续</button>
-      </form>
-    </main>`,
-  }), status);
-}
-
-function layout({ title, body }) {
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<style>
-:root {
-  --bg: #f5f7fb;
-  --panel: #ffffff;
-  --text: #172033;
-  --muted: #647084;
-  --line: #dfe5ef;
-  --ink: #111827;
-  --ok: #0f766e;
-  --danger: #b42318;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  min-height: 100vh;
-  background: var(--bg);
-  color: var(--text);
-  font-family: "Inter", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
-}
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0 0 auto 0;
-  height: 220px;
-  background: linear-gradient(180deg, #eaf0f8, rgba(245, 247, 251, 0));
-  pointer-events: none;
-}
-main, section { position: relative; }
-.topbar {
-  width: min(1180px, calc(100% - 40px));
-  margin: 34px auto 18px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.eyebrow {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-h1, h2 { margin: 0; color: var(--ink); }
-h1 { margin-top: 4px; font-size: 30px; letter-spacing: 0; }
-h2 { margin-bottom: 16px; font-size: 18px; }
-p { margin: 0 0 18px; color: var(--muted); line-height: 1.7; }
-.grid {
-  width: min(1180px, calc(100% - 40px));
-  margin: 0 auto 18px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
-}
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(23, 32, 51, .06);
-  padding: 22px;
-}
-.grid > .panel > button[type="submit"] {
-  min-width: 108px;
-  margin-top: 14px;
-}
-.table-panel {
-  width: min(1180px, calc(100% - 40px));
-  margin: 0 auto 18px;
-}
-label { display: block; margin: 12px 0 7px; color: #344054; font-size: 13px; font-weight: 700; }
-input, select {
-  width: 100%;
-  height: 40px;
-  padding: 0 11px;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  background: #fff;
-  color: var(--text);
-  font: inherit;
-}
-input:focus, select:focus { outline: 2px solid #111827; outline-offset: 2px; }
-.check { display: flex; gap: 8px; align-items: center; }
-.check input { width: auto; height: auto; }
-button, .ghost {
-  height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 6px;
-  background: var(--ink);
-  color: #fff;
-  padding: 0 14px;
-  font: inherit;
-  font-weight: 700;
-  text-decoration: none;
-  cursor: pointer;
-}
-button:disabled { opacity: .5; cursor: not-allowed; }
-.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
-.mini { height: 30px; padding: 0 10px; font-size: 12px; }
-.success { background: #0f766e; color: #fff; }
-.warning { background: #b45309; color: #fff; }
-.danger { background: #fff; color: var(--danger); border: 1px solid #f2c6c2; }
-[hidden] { display: none !important; }
-.table { display: grid; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.thead, .tr { display: grid; grid-template-columns: 90px 1.5fr 110px 1fr 140px; align-items: center; gap: 12px; padding: 12px 14px; }
-.codes .thead, .codes .tr { grid-template-columns: 90px 1.6fr 180px 1fr; }
-.thead { background: #f8fafc; color: var(--muted); font-size: 12px; font-weight: 800; }
-.tr { border-top: 1px solid var(--line); font-size: 14px; }
-.tr small { display: block; margin-top: 4px; color: var(--muted); }
-.actions { display: flex; gap: 8px; }
-.ok { color: var(--ok); }
-.muted { color: var(--muted); }
-.empty { padding: 18px; color: var(--muted); }
-.notice {
-  width: min(1180px, calc(100% - 40px));
-  margin: 0 auto 18px;
-  padding: 16px 18px;
-  border: 1px solid #b7e4d8;
-  border-radius: 8px;
-  background: #ecfdf5;
-}
-.notice code {
-  display: block;
-  margin-top: 8px;
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--ink);
-}
-.error-notice {
-  border-color: #f2c6c2;
-  background: #fff1f0;
-  color: var(--danger);
-  font-weight: 700;
-}
-.login {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-}
-.login-panel {
-  width: min(100%, 420px);
-  padding: 28px;
-}
-.login-panel p {
-  margin-bottom: 22px;
-}
-.login-panel label {
-  margin-top: 18px;
-}
-.login-panel input {
-  height: 48px;
-  font-size: 16px;
-}
-.login-panel button[type="submit"] {
-  width: 100%;
-  height: 48px;
-  margin-top: 16px;
-  font-size: 16px;
-}
-.error { color: var(--danger); font-weight: 700; }
-@media (max-width: 820px) {
-  .grid { grid-template-columns: 1fr; }
-  .thead { display: none; }
-  .tr, .codes .tr { grid-template-columns: 1fr; gap: 6px; }
-  .actions { align-items: flex-start; }
-}
-</style>
-</head>
-<body>${body}</body>
-</html>`;
+function loginPage(env, { returnUrl, target, error }, status = 200) {
+  return html(renderLoginPage({ returnUrl, target, error }), status);
 }
 
 function escapeHtml(value) {
