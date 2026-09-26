@@ -55,7 +55,7 @@ async function handleLogin(request, env) {
 
   if (password === env.ADMIN_PASSWORD) {
     const token = await createToken({ type: "admin" }, ADMIN_SESSION_SECONDS, env);
-    return redirect(returnUrl, replaceCookie(getAdminCookieName(env), token, ADMIN_SESSION_SECONDS, env), 303);
+    return completeLogin(request, env, returnUrl, replaceCookie(getAdminCookieName(env), token, ADMIN_SESSION_SECONDS, env));
   }
 
   const target = parseTarget(returnUrl);
@@ -78,7 +78,7 @@ async function handleLogin(request, env) {
 
       const seconds = Number(env.DEFAULT_ACCESS_SECONDS || DEFAULT_ACCESS_SECONDS);
       const token = await createToken({ type: "access", ruleId: rule.id, host: rule.host, pathPattern: rule.path_pattern }, seconds, env);
-      return redirect(returnUrl, replaceCookie(getAccessCookieName(env), token, seconds, env), 303);
+      return completeLogin(request, env, returnUrl, replaceCookie(getAccessCookieName(env), token, seconds, env));
     }
   }
 
@@ -87,7 +87,7 @@ async function handleLogin(request, env) {
     const rule = codeResult.rule;
     if (codeResult.sessionSeconds > 0) {
       const token = await createToken({ type: "access", ruleId: rule.id, host: rule.host, pathPattern: rule.path_pattern }, codeResult.sessionSeconds, env);
-      return redirect(returnUrl, replaceCookie(getAccessCookieName(env), token, codeResult.sessionSeconds, env), 303);
+      return completeLogin(request, env, returnUrl, replaceCookie(getAccessCookieName(env), token, codeResult.sessionSeconds, env));
     }
 
     const grant = await createOneTimeGrant(rule, env);
@@ -411,6 +411,14 @@ function setCookie(name, value, maxAge, env) {
   return `${name}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax${domain}`;
 }
 
+function completeLogin(request, env, returnUrl, cookies) {
+  const target = parseTarget(returnUrl);
+  const sameSiteTarget = !/^https?:\/\//i.test(returnUrl) || (target && target.host.toLowerCase() === new URL(request.url).host.toLowerCase());
+  if (sameSiteTarget) return redirect(returnUrl, cookies, 303);
+
+  return html(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>登录成功</title></head><body><p>登录成功，正在安全跳转…</p><form id="continue" method="post" action="${escapeHtml(returnUrl)}"></form><script>document.getElementById("continue").submit()</script><noscript><button form="continue" type="submit">继续访问</button></noscript></body></html>`, 200, cookies);
+}
+
 function replaceCookie(name, value, maxAge, env) {
   // Older deployments may have created a host-only cookie with the same name.
   // Expire it before writing the shared-domain cookie so browsers cannot send
@@ -564,11 +572,13 @@ function json(data, status = 200) {
   });
 }
 
-function html(content, status = 200) {
-  return new Response(content, {
-    status,
-    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+function html(content, status = 200, cookies = []) {
+  const headers = new Headers({
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
   });
+  for (const cookie of cookies) headers.append("set-cookie", cookie);
+  return new Response(content, { status, headers });
 }
 
 function redirect(location, cookies = [], status = 302) {

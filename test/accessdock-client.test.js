@@ -118,6 +118,22 @@ test("accepts a valid admin cookie when an older duplicate appears first", async
   assert.equal(admin.status, 200);
 });
 
+test("uses a top-level POST after cross-site login so mobile browsers send the Lax cookie", async () => {
+  const response = await worker.fetch(
+    new Request("https://auth.example.com/login", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "password=admin-password&return=https%3A%2F%2Fpaste.example.net%2F",
+    }),
+    createAccessDockEnv(),
+  );
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /text\/html/);
+  assert.match(await response.text(), /method="post" action="https:\/\/paste\.example\.net\//);
+  assert.equal(response.headers.getSetCookie().some((cookie) => cookie.startsWith("accessdock_admin=") && cookie.includes("Max-Age=2592000")), true);
+});
+
 test("clears both host-only and shared-domain administrator cookies on logout", async () => {
   const response = await worker.fetch(new Request("https://auth.example.com/logout"), createAccessDockEnv());
 
