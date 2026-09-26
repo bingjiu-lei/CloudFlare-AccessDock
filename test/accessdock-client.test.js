@@ -118,7 +118,7 @@ test("accepts a valid admin cookie when an older duplicate appears first", async
   assert.equal(admin.status, 200);
 });
 
-test("uses a top-level POST after cross-site login so mobile browsers send the Lax cookie", async () => {
+test("keeps cross-site login navigation on AccessDock before returning to the target", async () => {
   const response = await worker.fetch(
     new Request("https://auth.example.com/login", {
       method: "POST",
@@ -130,7 +130,9 @@ test("uses a top-level POST after cross-site login so mobile browsers send the L
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type"), /text\/html/);
-  assert.match(await response.text(), /method="post" action="https:\/\/paste\.example\.net\//);
+  const body = await response.text();
+  assert.match(body, /window\.location\.replace\("https:\/\/paste\.example\.net\//);
+  assert.doesNotMatch(body, /method="post"/);
   assert.equal(response.headers.getSetCookie().some((cookie) => cookie.startsWith("accessdock_admin=") && cookie.includes("Max-Age=2592000")), true);
 });
 

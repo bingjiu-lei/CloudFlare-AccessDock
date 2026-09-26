@@ -416,7 +416,7 @@ function completeLogin(request, env, returnUrl, cookies) {
   const sameSiteTarget = !/^https?:\/\//i.test(returnUrl) || (target && target.host.toLowerCase() === new URL(request.url).host.toLowerCase());
   if (sameSiteTarget) return redirect(returnUrl, cookies, 303);
 
-  return html(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>登录成功</title></head><body><p>登录成功，正在安全跳转…</p><form id="continue" method="post" action="${escapeHtml(returnUrl)}"></form><script>document.getElementById("continue").submit()</script><noscript><button form="continue" type="submit">继续访问</button></noscript></body></html>`, 200, cookies);
+  return html(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>登录成功</title></head><body><p>登录成功，正在返回访问页面…</p><script>window.location.replace(${JSON.stringify(returnUrl)})</script><noscript><a href="${escapeHtml(returnUrl)}">继续访问</a></noscript></body></html>`, 200, cookies);
 }
 
 function replaceCookie(name, value, maxAge, env) {
