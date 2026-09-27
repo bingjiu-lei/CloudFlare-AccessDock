@@ -132,6 +132,7 @@ test("keeps cross-site login navigation on AccessDock before returning to the ta
   assert.match(response.headers.get("content-type"), /text\/html/);
   const body = await response.text();
   assert.match(body, /window\.location\.replace\("https:\/\/paste\.example\.net\//);
+  assert.match(body, /http-equiv="refresh"/);
   assert.doesNotMatch(body, /method="post"/);
   assert.equal(response.headers.getSetCookie().some((cookie) => cookie.startsWith("accessdock_admin=") && cookie.includes("Max-Age=2592000")), true);
 });
