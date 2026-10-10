@@ -2,8 +2,11 @@ name = "cloudflare-accessdock"
 main = "src/index.js"
 compatibility_date = "2026-06-01"
 
+[vars]
+COOKIE_DOMAIN = ".leiyun.space"
+PUBLIC_BASE_URL = "https://auth.leiyun.space"
+
 [[d1_databases]]
 binding = "ACCESSDOCK_DB"
 database_name = "accessdock"
 database_id = "replace-with-your-d1-database-id"
-

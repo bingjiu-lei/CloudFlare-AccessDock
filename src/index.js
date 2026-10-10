@@ -26,7 +26,7 @@ export default {
     if (url.pathname === "/") return redirect("/admin");
     if (url.pathname === "/admin") return requireAdmin(request, env, () => adminPage(env, request));
     if (url.pathname === "/login") return handleLogin(request, env);
-    if (url.pathname === "/logout") return redirect("/login", clearCookies(getAdminCookieName(env), env));
+    if (url.pathname === "/logout") return redirect("/login", clearCookies(getAdminCookieName(env), env, request));
     if (url.pathname === "/api/check") return handleCheck(request, env);
     if (url.pathname === "/admin/rules") return requireAdmin(request, env, () => handleRules(request, env));
     if (url.pathname === "/admin/rules/toggle") return requireAdmin(request, env, () => handleRuleToggle(request, env));
@@ -55,7 +55,7 @@ async function handleLogin(request, env) {
 
   if (password === env.ADMIN_PASSWORD) {
     const token = await createToken({ type: "admin" }, ADMIN_SESSION_SECONDS, env);
-    return completeLogin(request, env, returnUrl, replaceCookie(getAdminCookieName(env), token, ADMIN_SESSION_SECONDS, env));
+    return completeLogin(request, env, returnUrl, replaceCookie(getAdminCookieName(env), token, ADMIN_SESSION_SECONDS, env, request));
   }
 
   const target = parseTarget(returnUrl);
@@ -78,7 +78,7 @@ async function handleLogin(request, env) {
 
       const seconds = Number(env.DEFAULT_ACCESS_SECONDS || DEFAULT_ACCESS_SECONDS);
       const token = await createToken({ type: "access", ruleId: rule.id, host: rule.host, pathPattern: rule.path_pattern }, seconds, env);
-      return completeLogin(request, env, returnUrl, replaceCookie(getAccessCookieName(env), token, seconds, env));
+      return completeLogin(request, env, returnUrl, replaceCookie(getAccessCookieName(env), token, seconds, env, request));
     }
   }
 
@@ -87,7 +87,7 @@ async function handleLogin(request, env) {
     const rule = codeResult.rule;
     if (codeResult.sessionSeconds > 0) {
       const token = await createToken({ type: "access", ruleId: rule.id, host: rule.host, pathPattern: rule.path_pattern }, codeResult.sessionSeconds, env);
-      return completeLogin(request, env, returnUrl, replaceCookie(getAccessCookieName(env), token, codeResult.sessionSeconds, env));
+      return completeLogin(request, env, returnUrl, replaceCookie(getAccessCookieName(env), token, codeResult.sessionSeconds, env, request));
     }
 
     const grant = await createOneTimeGrant(rule, env);
@@ -406,34 +406,58 @@ function loginUrl(env, returnUrl) {
   return `${getBaseUrl(env)}/login?return=${encodeURIComponent(returnUrl)}`;
 }
 
-function setCookie(name, value, maxAge, env) {
-  const domain = env.COOKIE_DOMAIN ? `; Domain=${env.COOKIE_DOMAIN}` : "";
-  return `${name}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax${domain}`;
+function resolveCookieDomain(request, env) {
+  let host = "";
+  if (request) {
+    try {
+      host = new URL(request.url).hostname.toLowerCase();
+    } catch {}
+  }
+
+  const configured = String(env?.COOKIE_DOMAIN || "").trim();
+  if (configured) {
+    const clean = configured.startsWith(".") ? configured : `.${configured}`;
+    if (!host || host.endsWith(clean.slice(1))) {
+      return clean;
+    }
+  }
+
+  if (!host || host === "localhost" || host === "127.0.0.1" || host.endsWith(".workers.dev")) {
+    return "";
+  }
+
+  const parts = host.split(".");
+  if (parts.length >= 2) {
+    return `.${parts.slice(-2).join(".")}`;
+  }
+
+  return "";
+}
+
+function setCookie(name, value, maxAge, env, request) {
+  const domain = resolveCookieDomain(request, env);
+  const domainAttr = domain ? `; Domain=${domain}` : "";
+  return `${name}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax${domainAttr}`;
 }
 
 function completeLogin(request, env, returnUrl, cookies) {
-  const target = parseTarget(returnUrl);
-  const sameSiteTarget = !/^https?:\/\//i.test(returnUrl) || (target && target.host.toLowerCase() === new URL(request.url).host.toLowerCase());
-  if (sameSiteTarget) return redirect(returnUrl, cookies, 303);
-
-  return html(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="0;url=${escapeHtml(returnUrl)}"><title>登录成功</title></head><body><p>登录成功，正在返回访问页面…</p><script>window.location.replace(${JSON.stringify(returnUrl)})</script><noscript><a href="${escapeHtml(returnUrl)}">继续访问</a></noscript></body></html>`, 200, cookies);
+  return redirect(returnUrl, cookies, 303);
 }
 
-function replaceCookie(name, value, maxAge, env) {
-  // Only send valid session cookies on login. Never send Max-Age=0 here.
-  // Mobile WebKit and Android WebView purge cookies when Max-Age=0 is received.
-  // Setting both domain and host cookies ensures cross-subdomain and fallback support.
-  const cookies = [setCookie(name, value, maxAge, env)];
-  if (env.COOKIE_DOMAIN) {
+function replaceCookie(name, value, maxAge, env, request) {
+  const cookies = [setCookie(name, value, maxAge, env, request)];
+  const domain = resolveCookieDomain(request, env);
+  if (domain) {
     cookies.push(`${name}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`);
   }
   return cookies;
 }
 
-function clearCookies(name, env) {
+function clearCookies(name, env, request) {
   const attributes = "; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
   const cookies = [`${name}=${attributes}`];
-  if (env.COOKIE_DOMAIN) cookies.push(`${name}=${attributes}; Domain=${env.COOKIE_DOMAIN}`);
+  const domain = resolveCookieDomain(request, env);
+  if (domain) cookies.push(`${name}=${attributes}; Domain=${domain}`);
   return cookies;
 }
 

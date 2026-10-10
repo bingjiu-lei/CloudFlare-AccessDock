@@ -750,11 +750,11 @@ body {
 }
 
 .login-card {
-  width: min(420px, 100%);
+  width: min(390px, 100%);
   background: #141417;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  padding: 36px 32px;
+  padding: 32px 28px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
   text-align: center;
   position: relative;
@@ -762,8 +762,8 @@ body {
 }
 
 .login-logo {
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   border-radius: 12px;
   background: #18181b;
   border: 1px solid var(--line);
@@ -771,43 +771,48 @@ body {
   align-items: center;
   justify-content: center;
   color: #ffffff;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .login-title {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   color: #ffffff;
   letter-spacing: -0.02em;
-  margin: 0 0 8px;
-}
-
-.login-subtitle {
-  font-size: 13px;
-  color: var(--muted);
-  margin: 0 0 24px;
-  line-height: 1.6;
+  margin: 0 0 16px;
 }
 
 .target-chip {
   background: #18181b;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 10px 14px;
-  font-size: 12px;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
   color: var(--muted);
-  text-align: left;
-  margin-bottom: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  text-align: center;
+  margin: 0 auto 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: 100%;
 }
 
-.target-chip span {
+.target-chip .target-label {
+  font-size: 10px;
+  color: var(--subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.target-chip .target-url {
   font-family: ui-monospace, SFMono-Regular, monospace;
   color: #ffffff;
-  font-weight: 600;
-  word-break: break-all;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .login-input-group {
@@ -1435,12 +1440,11 @@ export function renderLoginPage({ returnUrl, target, error }) {
       <div class="login-card">
         <div class="login-logo">${ICONS.shield}</div>
         <h1 class="login-title">AccessDock</h1>
-        <p class="login-subtitle">此页面受统一访问网关保护，请输入通行凭据继续</p>
 
         ${hasTarget ? `
           <div class="target-chip">
-            <span style="font-size: 11px; color: var(--muted); text-transform: uppercase;">Protected Target</span>
-            <span>https://${escapeHtml(target.host)}${escapeHtml(target.path)}</span>
+            <span class="target-label">Protected Target</span>
+            <span class="target-url">${escapeHtml(target.host)}${escapeHtml(target.path)}</span>
           </div>
         ` : ""}
 
@@ -1455,7 +1459,7 @@ export function renderLoginPage({ returnUrl, target, error }) {
           <input type="hidden" name="return" value="${escapeHtml(returnUrl)}">
           
           <div class="login-input-group">
-            <input id="passwordField" name="password" type="password" autocomplete="current-password" autofocus required placeholder="请输入管理员密码、访问密码或临时码">
+            <input id="passwordField" name="password" type="password" autocomplete="current-password" autofocus required placeholder="请输入密码或临时通行码">
             <button type="button" class="toggle-pwd" onclick="togglePasswordVisibility()" title="显示/隐藏密码">
               ${ICONS.eye}
             </button>
@@ -1465,10 +1469,6 @@ export function renderLoginPage({ returnUrl, target, error }) {
             <span>验证并访问</span> →
           </button>
         </form>
-
-        <div class="login-footer">
-          POWERED BY CLOUDFLARE WORKERS & D1 EDGE
-        </div>
       </div>
     </main>
 

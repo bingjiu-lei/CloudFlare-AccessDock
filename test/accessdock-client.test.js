@@ -118,7 +118,7 @@ test("accepts a valid admin cookie when an older duplicate appears first", async
   assert.equal(admin.status, 200);
 });
 
-test("keeps cross-site login navigation on AccessDock before returning to the target", async () => {
+test("redirects directly to target upon login without white loading screen", async () => {
   const response = await worker.fetch(
     new Request("https://auth.example.com/login", {
       method: "POST",
@@ -128,12 +128,8 @@ test("keeps cross-site login navigation on AccessDock before returning to the ta
     createAccessDockEnv(),
   );
 
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type"), /text\/html/);
-  const body = await response.text();
-  assert.match(body, /window\.location\.replace\("https:\/\/paste\.example\.net\//);
-  assert.match(body, /http-equiv="refresh"/);
-  assert.doesNotMatch(body, /method="post"/);
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get("location"), "https://paste.example.net/");
   assert.equal(response.headers.getSetCookie().some((cookie) => cookie.startsWith("accessdock_admin=") && cookie.includes("Max-Age=2592000")), true);
 });
 
