@@ -42,6 +42,32 @@ async function handleLogin(request, env) {
     const url = new URL(request.url);
     const returnUrl = sanitizeReturnUrl(url.searchParams.get("return") || "/admin");
     const target = parseTarget(returnUrl);
+
+    // Silent Single Sign-On: if administrator session already exists, bypass password prompt!
+    if (await hasAdminSession(request, env)) {
+      const tokens = getCookies(request, getAdminCookieName(env));
+      let token = tokens[0];
+      if (!token || !(await verifyToken(token, env))) {
+        token = await createToken({ type: "admin" }, ADMIN_SESSION_SECONDS, env);
+      }
+      return completeLogin(request, env, appendQuery(returnUrl, "ad_session", token), replaceCookie(getAdminCookieName(env), token, ADMIN_SESSION_SECONDS, env, request));
+    }
+
+    // If target has an existing valid access session, bypass password prompt
+    if (target) {
+      const rules = await findMatchingRules(env, target.host, target.path);
+      const accessRule = await findAccessSessionRule(request, env, rules);
+      if (accessRule) {
+        const tokens = getCookies(request, getAccessCookieName(env));
+        let token = tokens[0];
+        if (!token || !(await verifyToken(token, env))) {
+          const seconds = Number(env.DEFAULT_ACCESS_SECONDS || DEFAULT_ACCESS_SECONDS);
+          token = await createToken({ type: "access", ruleId: accessRule.id, host: accessRule.host, pathPattern: accessRule.path_pattern }, seconds, env);
+        }
+        return completeLogin(request, env, appendQuery(returnUrl, "ad_session", token), replaceCookie(getAccessCookieName(env), token, Number(env.DEFAULT_ACCESS_SECONDS || DEFAULT_ACCESS_SECONDS), env, request));
+      }
+    }
+
     return loginPage(env, {
       returnUrl,
       target,

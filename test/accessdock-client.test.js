@@ -176,3 +176,31 @@ test("accepts ad_session in returnUrl when mobile browser withholds cookies on c
   assert.equal(data.allowed, true);
   assert.equal(data.role, "admin");
 });
+
+test("silently redirects via SSO on GET /login when administrator session is already active", async () => {
+  const env = createAccessDockEnv();
+  const login = await worker.fetch(
+    new Request("https://auth.example.com/login", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "password=admin-password&return=%2Fadmin",
+    }),
+    env,
+  );
+
+  const sessionCookie = login.headers
+    .getSetCookie()
+    .find((cookie) => cookie.startsWith("accessdock_admin="));
+  const token = sessionCookie.match(/^accessdock_admin=([^;]+)/)[1];
+
+  const ssoResponse = await worker.fetch(
+    new Request("https://auth.example.com/login?return=https%3A%2F%2Fpaste.example.net%2F", {
+      method: "GET",
+      headers: { cookie: `accessdock_admin=${token}` },
+    }),
+    env,
+  );
+
+  assert.equal(ssoResponse.status, 303);
+  assert.match(ssoResponse.headers.get("location"), /^https:\/\/paste\.example\.net\/\?ad_session=/);
+});

@@ -43,6 +43,16 @@ export async function checkAccess(request, env, options = {}) {
   }
 
   if (result.loginUrl) {
+    if (request.method !== "GET" || url.pathname.startsWith("/api/")) {
+      return {
+        ok: false,
+        response: new Response(
+          JSON.stringify({ ok: false, error: "登录已失效，请重新登录", loginUrl: result.loginUrl }),
+          { status: 401, headers: { "Content-Type": "application/json" } }
+        ),
+        result,
+      };
+    }
     return {
       ok: false,
       response: Response.redirect(result.loginUrl, 302),
