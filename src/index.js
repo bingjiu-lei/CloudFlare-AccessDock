@@ -55,7 +55,7 @@ async function handleLogin(request, env) {
 
   if (password === env.ADMIN_PASSWORD) {
     const token = await createToken({ type: "admin" }, ADMIN_SESSION_SECONDS, env);
-    return completeLogin(request, env, returnUrl, replaceCookie(getAdminCookieName(env), token, ADMIN_SESSION_SECONDS, env, request));
+    return completeLogin(request, env, appendQuery(returnUrl, "ad_session", token), replaceCookie(getAdminCookieName(env), token, ADMIN_SESSION_SECONDS, env, request));
   }
 
   const target = parseTarget(returnUrl);
@@ -78,7 +78,7 @@ async function handleLogin(request, env) {
 
       const seconds = Number(env.DEFAULT_ACCESS_SECONDS || DEFAULT_ACCESS_SECONDS);
       const token = await createToken({ type: "access", ruleId: rule.id, host: rule.host, pathPattern: rule.path_pattern }, seconds, env);
-      return completeLogin(request, env, returnUrl, replaceCookie(getAccessCookieName(env), token, seconds, env, request));
+      return completeLogin(request, env, appendQuery(returnUrl, "ad_session", token), replaceCookie(getAccessCookieName(env), token, seconds, env, request));
     }
   }
 
@@ -87,7 +87,7 @@ async function handleLogin(request, env) {
     const rule = codeResult.rule;
     if (codeResult.sessionSeconds > 0) {
       const token = await createToken({ type: "access", ruleId: rule.id, host: rule.host, pathPattern: rule.path_pattern }, codeResult.sessionSeconds, env);
-      return completeLogin(request, env, returnUrl, replaceCookie(getAccessCookieName(env), token, codeResult.sessionSeconds, env, request));
+      return completeLogin(request, env, appendQuery(returnUrl, "ad_session", token), replaceCookie(getAccessCookieName(env), token, codeResult.sessionSeconds, env, request));
     }
 
     const grant = await createOneTimeGrant(rule, env);
@@ -110,6 +110,22 @@ async function handleCheck(request, env) {
   if (await hasAdminSession(request, env)) return json({ allowed: true, protected: true, role: "admin", rule });
   const accessRule = await findAccessSessionRule(request, env, rules);
   if (accessRule) return json({ allowed: true, protected: true, role: "access", rule: accessRule });
+
+  try {
+    const returnUrlObj = new URL(returnUrl);
+    const sessionToken = returnUrlObj.searchParams.get("ad_session");
+    if (sessionToken) {
+      const payload = await verifyToken(sessionToken, env);
+      if (payload?.type === "admin") {
+        return json({ allowed: true, protected: true, role: "admin", rule });
+      }
+      if (payload?.type === "access") {
+        if (Number(payload.ruleId) === Number(rule.id) || matchScope(rule.host, rule.path_pattern, payload.host, payload.pathPattern)) {
+          return json({ allowed: true, protected: true, role: "access", rule });
+        }
+      }
+    }
+  } catch {}
 
   const grantToken = new URL(returnUrl).searchParams.get("ad_grant");
   if (grantToken) {
@@ -247,6 +263,14 @@ async function hasAdminSession(request, env) {
     const payload = await verifyToken(token, env);
     if (payload?.type === "admin") return true;
   }
+  try {
+    const url = new URL(request.url);
+    const sessionToken = url.searchParams.get("ad_session");
+    if (sessionToken) {
+      const payload = await verifyToken(sessionToken, env);
+      if (payload?.type === "admin") return true;
+    }
+  } catch {}
   return false;
 }
 
@@ -256,6 +280,16 @@ async function hasAccessSession(request, env, rule) {
     if (payload?.type !== "access") continue;
     if (Number(payload.ruleId) === Number(rule.id) || matchScope(rule.host, rule.path_pattern, payload.host, payload.pathPattern)) return true;
   }
+  try {
+    const url = new URL(request.url);
+    const sessionToken = url.searchParams.get("ad_session");
+    if (sessionToken) {
+      const payload = await verifyToken(sessionToken, env);
+      if (payload?.type === "access") {
+        if (Number(payload.ruleId) === Number(rule.id) || matchScope(rule.host, rule.path_pattern, payload.host, payload.pathPattern)) return true;
+      }
+    }
+  } catch {}
   return false;
 }
 
@@ -345,13 +379,17 @@ async function createToken(payload, maxAgeSeconds, env) {
 }
 
 async function verifyToken(token, env) {
-  if (!token || !token.includes(".")) return null;
-  const [encoded, signature] = token.split(".");
-  const expected = await sign(encoded, env);
-  if (!timingSafeEqual(signature || "", expected)) return null;
-  const payload = JSON.parse(base64UrlDecode(encoded));
-  if (!payload.exp || unix() > payload.exp) return null;
-  return payload;
+  try {
+    if (!token || !token.includes(".")) return null;
+    const [encoded, signature] = token.split(".");
+    const expected = await sign(encoded, env);
+    if (!timingSafeEqual(signature || "", expected)) return null;
+    const payload = JSON.parse(base64UrlDecode(encoded));
+    if (!payload.exp || unix() > payload.exp) return null;
+    return payload;
+  } catch {
+    return null;
+  }
 }
 
 async function sign(value, env) {
@@ -397,9 +435,16 @@ function matchScope(host, pattern, payloadHost, payloadPattern) {
 }
 
 function appendQuery(value, key, data) {
-  const url = new URL(value);
-  url.searchParams.set(key, data);
-  return url.toString();
+  try {
+    const url = new URL(value, "https://accessdock.local");
+    url.searchParams.set(key, data);
+    return value.startsWith("http://") || value.startsWith("https://")
+      ? url.toString()
+      : `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    const sep = value.includes("?") ? "&" : "?";
+    return `${value}${sep}${encodeURIComponent(key)}=${encodeURIComponent(data)}`;
+  }
 }
 
 function loginUrl(env, returnUrl) {
@@ -437,7 +482,8 @@ function resolveCookieDomain(request, env) {
 function setCookie(name, value, maxAge, env, request) {
   const domain = resolveCookieDomain(request, env);
   const domainAttr = domain ? `; Domain=${domain}` : "";
-  return `${name}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax${domainAttr}`;
+  const expires = new Date(Date.now() + maxAge * 1000).toUTCString();
+  return `${name}=${value}; Path=/; Max-Age=${maxAge}; Expires=${expires}; HttpOnly; Secure; SameSite=None${domainAttr}`;
 }
 
 function completeLogin(request, env, returnUrl, cookies) {
@@ -445,12 +491,7 @@ function completeLogin(request, env, returnUrl, cookies) {
 }
 
 function replaceCookie(name, value, maxAge, env, request) {
-  const cookies = [setCookie(name, value, maxAge, env, request)];
-  const domain = resolveCookieDomain(request, env);
-  if (domain) {
-    cookies.push(`${name}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`);
-  }
-  return cookies;
+  return [setCookie(name, value, maxAge, env, request)];
 }
 
 function clearCookies(name, env, request) {

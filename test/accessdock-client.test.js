@@ -129,7 +129,7 @@ test("redirects directly to target upon login without white loading screen", asy
   );
 
   assert.equal(response.status, 303);
-  assert.equal(response.headers.get("location"), "https://paste.example.net/");
+  assert.match(response.headers.get("location"), /^https:\/\/paste\.example\.net\/\?ad_session=/);
   assert.equal(response.headers.getSetCookie().some((cookie) => cookie.startsWith("accessdock_admin=") && cookie.includes("Max-Age=2592000")), true);
 });
 
@@ -141,4 +141,38 @@ test("clears both host-only and shared-domain administrator cookies on logout", 
     "accessdock_admin=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
     "accessdock_admin=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax; Domain=.example.com",
   ]);
+});
+
+test("accepts ad_session in returnUrl when mobile browser withholds cookies on cross-origin redirect", async () => {
+  const env = createAccessDockEnv();
+  env.ACCESSDOCK_DB.prepare = () => ({
+    bind() { return this; },
+    async run() { return {}; },
+    async all() { return { results: [{ id: 1, host: "paste.example.net", path_pattern: "/*", mode: "admin", enabled: 1 }] }; }
+  });
+
+  const login = await worker.fetch(
+    new Request("https://auth.example.com/login", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "password=admin-password&return=https%3A%2F%2Fpaste.example.net%2F",
+    }),
+    env,
+  );
+
+  const location = login.headers.get("location");
+  assert.match(location, /ad_session=/);
+
+  const checkResponse = await worker.fetch(
+    new Request(`https://auth.example.com/api/check?return=${encodeURIComponent(location)}`, {
+      method: "GET",
+      headers: { cookie: "" },
+    }),
+    env,
+  );
+
+  assert.equal(checkResponse.status, 200);
+  const data = await checkResponse.json();
+  assert.equal(data.allowed, true);
+  assert.equal(data.role, "admin");
 });
