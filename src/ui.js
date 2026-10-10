@@ -26,31 +26,31 @@ export function layout({ title, body }) {
 <title>${escapeHtml(title)} - AccessDock</title>
 <style>
 :root {
-  --bg: #090d16;
-  --bg-card: rgba(16, 24, 40, 0.72);
-  --bg-card-hover: rgba(26, 38, 62, 0.85);
-  --bg-input: rgba(13, 20, 36, 0.9);
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.16);
-  --text: #f8fafc;
-  --muted: #94a3b8;
-  --subtle: #64748b;
-  --primary: #6366f1;
-  --primary-hover: #4f46e5;
-  --primary-glow: rgba(99, 102, 241, 0.28);
-  --accent: #38bdf8;
+  --bg: #09090b;
+  --bg-card: #141417;
+  --bg-card-hover: #18181b;
+  --bg-input: #141417;
+  --line: #27272a;
+  --line-strong: #3f3f46;
+  --text: #f4f4f5;
+  --muted: #a1a1aa;
+  --subtle: #71717a;
+  --primary: #ffffff;
+  --primary-hover: #e4e4e7;
+  --primary-glow: rgba(255, 255, 255, 0.15);
+  --accent: #ffffff;
   --success: #10b981;
-  --success-bg: rgba(16, 185, 129, 0.12);
-  --success-border: rgba(16, 185, 129, 0.28);
+  --success-bg: rgba(16, 185, 129, 0.08);
+  --success-border: rgba(16, 185, 129, 0.2);
   --warning: #f59e0b;
-  --warning-bg: rgba(245, 158, 11, 0.12);
-  --warning-border: rgba(245, 158, 11, 0.28);
-  --danger: #f43f5e;
-  --danger-bg: rgba(244, 63, 94, 0.12);
-  --danger-border: rgba(244, 63, 94, 0.28);
+  --warning-bg: rgba(245, 158, 11, 0.08);
+  --warning-border: rgba(245, 158, 11, 0.2);
+  --danger: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.08);
+  --danger-border: rgba(239, 68, 68, 0.2);
   --radius-sm: 8px;
   --radius-md: 12px;
-  --radius-lg: 18px;
+  --radius-lg: 16px;
 }
 
 * { box-sizing: border-box; }
@@ -59,11 +59,6 @@ body {
   margin: 0;
   min-height: 100vh;
   background-color: var(--bg);
-  background-image: 
-    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.18) 0px, transparent 45%),
-    radial-gradient(at 100% 0%, rgba(56, 189, 248, 0.14) 0px, transparent 45%),
-    radial-gradient(at 50% 100%, rgba(16, 185, 129, 0.08) 0px, transparent 50%);
-  background-attachment: fixed;
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -93,16 +88,16 @@ body {
 }
 
 .brand-icon {
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--radius-md);
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(56, 189, 248, 0.2));
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #18181b;
+  border: 1px solid var(--line);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #38bdf8;
-  box-shadow: 0 4px 16px rgba(56, 189, 248, 0.15);
+  color: #ffffff;
+  box-shadow: none;
 }
 
 .brand-title {
@@ -189,13 +184,12 @@ body {
 
 /* Credential Badge / Generated Code Card */
 .credential-card {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(6, 182, 212, 0.08));
-  border: 1px solid var(--success-border);
+  background: var(--bg-card);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   padding: 24px;
   margin-bottom: 24px;
-  backdrop-filter: blur(12px);
-  box-shadow: 0 8px 30px rgba(16, 185, 129, 0.08);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
   animation: slideDown 0.3s ease-out;
 }
 
@@ -217,15 +211,15 @@ body {
   gap: 8px;
   font-size: 13px;
   font-weight: 700;
-  color: var(--success);
+  color: #ffffff;
 }
 
 .credential-duration {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.05);
+  background: #18181b;
   padding: 4px 10px;
-  border-radius: 20px;
+  border-radius: 6px;
   border: 1px solid var(--line);
 }
 
@@ -233,10 +227,10 @@ body {
   display: flex;
   align-items: center;
   gap: 16px;
-  background: rgba(0, 0, 0, 0.35);
+  background: #09090b;
   padding: 16px 20px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  border: 1px solid var(--line);
 }
 
 .credential-code-box {
@@ -257,7 +251,7 @@ body {
   font-size: 26px;
   font-weight: 800;
   letter-spacing: 0.08em;
-  color: #34d399;
+  color: #ffffff;
   user-select: all;
 }
 
@@ -425,54 +419,42 @@ body {
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 600;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
   line-height: 1;
+  background: #18181b;
+  color: #d4d4d8;
+  border: 1px solid var(--line);
 }
 
 .badge-success {
-  background: var(--success-bg);
-  color: #34d399;
-  border: 1px solid var(--success-border);
+  background: #18181b;
+  color: #ffffff;
+  border: 1px solid var(--line-strong);
 }
 
 .badge-muted {
-  background: rgba(148, 163, 184, 0.1);
-  color: #94a3b8;
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: #141417;
+  color: var(--subtle);
+  border: 1px solid var(--line);
 }
 
-.badge-indigo {
-  background: rgba(99, 102, 241, 0.12);
-  color: #a5b4fc;
-  border: 1px solid rgba(99, 102, 241, 0.25);
-}
-
-.badge-amber {
-  background: rgba(245, 158, 11, 0.12);
-  color: #fcd34d;
-  border: 1px solid rgba(245, 158, 11, 0.25);
-}
-
-.badge-cyan {
-  background: rgba(6, 182, 212, 0.12);
-  color: #67e8f9;
-  border: 1px solid rgba(6, 182, 212, 0.25);
-}
-
+.badge-indigo,
+.badge-amber,
+.badge-cyan,
 .badge-purple {
-  background: rgba(168, 85, 247, 0.12);
-  color: #d8b4fe;
-  border: 1px solid rgba(168, 85, 247, 0.25);
+  background: #18181b;
+  color: #d4d4d8;
+  border: 1px solid var(--line);
 }
 
 .pulse-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background-color: currentColor;
-  box-shadow: 0 0 8px currentColor;
+  background-color: #ffffff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
   animation: pulse 2s infinite;
 }
 
@@ -500,27 +482,28 @@ body {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #6366f1, #4f46e5);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.15);
-  box-shadow: 0 2px 10px var(--primary-glow);
+  background: #ffffff;
+  color: #09090b;
+  border-color: #ffffff;
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.18);
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, #4f46e5, #4338ca);
-  box-shadow: 0 4px 14px var(--primary-glow);
+  background: #e4e4e7;
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.28);
   transform: translateY(-1px);
 }
 
 .btn-secondary {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
+  background: #18181b;
+  color: #f4f4f5;
   border-color: var(--line);
 }
 
 .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: #27272a;
   border-color: var(--line-strong);
+  color: #ffffff;
 }
 
 .btn-ghost {
@@ -530,7 +513,7 @@ body {
 }
 
 .btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: #18181b;
   color: #fff;
   border-color: var(--line-strong);
 }
@@ -542,26 +525,26 @@ body {
 }
 
 .btn-toggle {
-  background: rgba(255, 255, 255, 0.05);
+  background: #18181b;
   color: var(--muted);
   border-color: var(--line);
 }
 
 .btn-toggle:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: #27272a;
   color: #fff;
 }
 
 .btn-danger-outline {
   background: transparent;
-  color: #fda4af;
-  border-color: rgba(244, 63, 94, 0.25);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.25);
 }
 
 .btn-danger-outline:hover {
-  background: var(--danger-bg);
-  border-color: var(--danger-border);
-  color: #f43f5e;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #ef4444;
 }
 
 .actions-cell {
@@ -763,51 +746,38 @@ body {
   align-items: center;
   justify-content: center;
   padding: 24px;
+  background: #09090b;
 }
 
 .login-card {
-  width: min(440px, 100%);
-  background: var(--bg-card);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--line-strong);
+  width: min(420px, 100%);
+  background: #141417;
+  border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   padding: 36px 32px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
   text-align: center;
   position: relative;
   overflow: hidden;
 }
 
-.login-card::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 180px;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--primary), var(--accent), transparent);
-}
-
 .login-logo {
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.35), rgba(56, 189, 248, 0.2));
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: #18181b;
+  border: 1px solid var(--line);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #38bdf8;
+  color: #ffffff;
   margin-bottom: 20px;
-  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.25);
 }
 
 .login-title {
-  font-size: 24px;
-  font-weight: 800;
-  color: #fff;
+  font-size: 22px;
+  font-weight: 700;
+  color: #ffffff;
   letter-spacing: -0.02em;
   margin: 0 0 8px;
 }
@@ -820,8 +790,8 @@ body {
 }
 
 .target-chip {
-  background: rgba(56, 189, 248, 0.08);
-  border: 1px solid rgba(56, 189, 248, 0.25);
+  background: #18181b;
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   padding: 10px 14px;
   font-size: 12px;
@@ -835,8 +805,8 @@ body {
 
 .target-chip span {
   font-family: ui-monospace, SFMono-Regular, monospace;
-  color: var(--accent);
-  font-weight: 700;
+  color: #ffffff;
+  font-weight: 600;
   word-break: break-all;
 }
 
@@ -848,20 +818,19 @@ body {
 
 .login-input-group input {
   width: 100%;
-  height: 48px;
+  height: 46px;
   padding: 0 46px 0 16px;
-  background: var(--bg-input);
+  background: #18181b;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   color: #fff;
-  font-size: 15px;
+  font-size: 14px;
   outline: none;
-  transition: all 0.2s ease;
+  transition: border-color 0.15s ease;
 }
 
 .login-input-group input:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--primary-glow);
+  border-color: #52525b;
 }
 
 .toggle-pwd {
@@ -885,10 +854,20 @@ body {
 
 .login-btn {
   width: 100%;
-  height: 48px;
-  font-size: 15px;
-  font-weight: 700;
+  height: 46px;
+  font-size: 14px;
+  font-weight: 600;
   border-radius: var(--radius-sm);
+  background: #ffffff;
+  color: #09090b;
+  border: 1px solid #ffffff;
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.15);
+  transition: all 0.15s ease;
+}
+
+.login-btn:hover {
+  background: #e4e4e7;
+  transform: translateY(-1px);
 }
 
 .login-footer {
